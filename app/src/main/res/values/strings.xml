@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- English (default). Copy from the design package `copy`; the Chinese mirror is in values-zh. -->
+<resources>
+    <string name="app_name">Robot Cell Fit</string>
+
+    <!-- aiming panel -->
+    <string name="aim_title">Tap a desk to place the UR5e</string>
+    <string name="aim_sub">Or tap the floor to add a stand</string>
+    <string name="aim_starting">Getting ready…</string>
+    <string name="aim_restoring">Finding your last cell…</string>
+
+    <!-- name badge -->
+    <string name="robot_name">UR5e</string>
+    <string name="mount_desk">Desk</string>
+    <string name="mount_floor">Floor</string>
+    <string name="badge_collides">Pose collides</string>
+
+    <!-- verdict chips -->
+    <string name="chip_desk">Desk %1$d%%</string>
+    <string name="chip_desk_none">Desk —</string>
+    <string name="chip_wall_in">Wall in %1$s</string>
+    <string name="chip_wall_ok">Wall %1$s</string>
+    <string name="chip_wall_far">Wall &gt; 50 cm</string>
+    <string name="chip_wall_none">Wall —</string>
+    <string name="chip_pins">Pins %1$d/%2$d</string>
+
+    <!-- tabs -->
+    <string name="tab_pose">Pose</string>
+    <string name="tab_joints">Joints</string>
+    <string name="tab_pins">Pins</string>
+
+    <!-- poses -->
+    <string name="pose_upright">Upright</string>
+    <string name="pose_tucked">Tucked</string>
+    <string name="pose_reach">Reach</string>
+    <string name="pose_pick">Pick</string>
+
+    <!-- joints -->
+    <string name="joint_name_1">J1 base</string>
+    <string name="joint_name_2">J2 shoulder</string>
+    <string name="joint_name_3">J3 elbow</string>
+    <string name="joint_name_4">J4 wrist 1</string>
+    <string name="joint_name_5">J5 wrist 2</string>
+    <string name="joint_name_6">J6 wrist 3</string>
+    <string name="action_zero">Zero</string>
+    <string name="action_minus5">−5°</string>
+    <string name="action_plus5">+5°</string>
+
+    <!-- pins -->
+    <string name="pins_hint">Tap the desk to drop a pin, tap a pin to remove it</string>
+    <string name="pins_count">%1$d pins · %2$d in reach</string>
+    <string name="pins_none">No pins yet</string>
+    <string name="action_clear_pins">Clear pins</string>
+
+    <!-- bottom row -->
+    <string name="gripper_none">Gripper none</string>
+    <string name="gripper_len">Gripper %1$s</string>
+    <string name="hint_stick">Turn with the stick · hold the base to move</string>
+    <string name="action_rot_ccw">Turn left 15°</string>
+    <string name="action_rot_cw">Turn right 15°</string>
+
+    <!-- icon keys -->
+    <string name="action_more">More</string>
+    <string name="action_undo">Undo</string>
+    <string name="action_delete">Delete</string>
+    <string name="action_exit">Exit</string>
+    <string name="action_close">Close</string>
+
+    <!-- worded buttons -->
+    <string name="action_cancel">Cancel</string>
+    <string name="action_clear">Clear</string>
+    <string name="action_retry">Retry</string>
+    <string name="action_got_it">Got it</string>
+
+    <!-- menu -->
+    <string name="menu_sphere">Reach sphere</string>
+    <string name="menu_language">Language</string>
+    <string name="menu_units">Units</string>
+    <string name="menu_clear">Clear all</string>
+    <string name="menu_exit">Exit</string>
+    <string name="lang_system">System</string>
+    <string name="lang_zh">中文</string>
+    <string name="lang_en">EN</string>
+    <string name="unit_cm">cm</string>
+    <string name="unit_in">in</string>
+
+    <!-- dialogs -->
+    <string name="dialog_clear_title">Clear the robot and all pins?</string>
+    <string name="dialog_clear_body">This can\'t be undone.</string>
+    <string name="dialog_blocked_title">Spatial features unavailable</string>
+    <string name="dialog_blocked_body">Allow plane detection and spatial anchors in Settings.</string>
+
+    <!-- snackbars -->
+    <string name="snack_scanning">Look around at the desk and floor</string>
+    <string name="snack_no_table">Look at the desk so it can be found</string>
+    <string name="snack_elsewhere">Last cell isn\'t here</string>
+    <string name="snack_unsaved">Not saved</string>
+    <string name="snack_lost">Tracking lost · look around</string>
+    <string name="snack_cleared">All cleared</string>
+    <string name="snack_restored">Last cell restored</string>
+    <string name="snack_limit_pins">Max 8 pins</string>
+    <string name="snack_deleted">Deleted</string>
+
+    <!-- plates and tags -->
+    <string name="plate_to_wall">%1$s to wall</string>
+    <string name="plate_over_wall">Past wall %1$s</string>
+    <string name="plate_edge">%1$s to edge</string>
+    <string name="plate_pin_short">%1$s short</string>
+    <string name="hit_wall">Hits wall</string>
+    <string name="hit_desk">Hits desk</string>
+
+    <!-- coachmark -->
+    <string name="coach_hint">Hold the base to move · tap a pose to see it move</string>
+</resources>

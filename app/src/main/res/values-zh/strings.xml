@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 中文。文案来自设计包 copy；提示条中文 ≤ 10 个字。 -->
+<resources>
+    <string name="app_name">机器人工位</string>
+
+    <!-- 瞄准面板 -->
+    <string name="aim_title">点桌面放下 UR5e</string>
+    <string name="aim_sub">也可以放在地上，会自动加底座</string>
+    <string name="aim_starting">准备中…</string>
+    <string name="aim_restoring">正在找回上次的工位</string>
+
+    <!-- 名牌 -->
+    <string name="robot_name">UR5e</string>
+    <string name="mount_desk">桌面</string>
+    <string name="mount_floor">落地</string>
+    <string name="badge_collides">姿势碰撞</string>
+
+    <!-- 判定牌 -->
+    <string name="chip_desk">桌面 %1$d%%</string>
+    <string name="chip_desk_none">桌面 —</string>
+    <string name="chip_wall_in">墙 进 %1$s</string>
+    <string name="chip_wall_ok">墙 离 %1$s</string>
+    <string name="chip_wall_far">墙 &gt; 50 cm</string>
+    <string name="chip_wall_none">墙 —</string>
+    <string name="chip_pins">钉 %1$d/%2$d</string>
+
+    <!-- 三段 -->
+    <string name="tab_pose">姿势</string>
+    <string name="tab_joints">关节</string>
+    <string name="tab_pins">钉</string>
+
+    <!-- 姿势 -->
+    <string name="pose_upright">竖直</string>
+    <string name="pose_tucked">收拢</string>
+    <string name="pose_reach">前伸</string>
+    <string name="pose_pick">桌面取物</string>
+
+    <!-- 关节 -->
+    <string name="joint_name_1">J1 底座</string>
+    <string name="joint_name_2">J2 肩</string>
+    <string name="joint_name_3">J3 肘</string>
+    <string name="joint_name_4">J4 腕 1</string>
+    <string name="joint_name_5">J5 腕 2</string>
+    <string name="joint_name_6">J6 腕 3</string>
+    <string name="action_zero">归零</string>
+    <string name="action_minus5">−5°</string>
+    <string name="action_plus5">+5°</string>
+
+    <!-- 钉 -->
+    <string name="pins_hint">点桌面插钉，点钉拔掉</string>
+    <string name="pins_count">%1$d 个钉 · %2$d 个够得着</string>
+    <string name="pins_none">还没有钉</string>
+    <string name="action_clear_pins">清除钉</string>
+
+    <!-- 底部行 -->
+    <string name="gripper_none">夹爪 无</string>
+    <string name="gripper_len">夹爪 %1$s</string>
+    <string name="hint_stick">摇杆左右转动 · 按住底座拖动</string>
+    <string name="action_rot_ccw">左转 15°</string>
+    <string name="action_rot_cw">右转 15°</string>
+
+    <!-- 图标键 -->
+    <string name="action_more">更多</string>
+    <string name="action_undo">撤销</string>
+    <string name="action_delete">删除</string>
+    <string name="action_exit">退出</string>
+    <string name="action_close">关闭</string>
+
+    <!-- 文字按钮 -->
+    <string name="action_cancel">取消</string>
+    <string name="action_clear">清除</string>
+    <string name="action_retry">重试</string>
+    <string name="action_got_it">知道了</string>
+
+    <!-- 菜单 -->
+    <string name="menu_sphere">显示可达球</string>
+    <string name="menu_language">语言</string>
+    <string name="menu_units">单位</string>
+    <string name="menu_clear">全部清除</string>
+    <string name="menu_exit">退出</string>
+    <string name="lang_system">跟随系统</string>
+    <string name="lang_zh">中文</string>
+    <string name="lang_en">EN</string>
+    <string name="unit_cm">cm</string>
+    <string name="unit_in">in</string>
+
+    <!-- 对话框 -->
+    <string name="dialog_clear_title">清除机器人和全部钉？</string>
+    <string name="dialog_clear_body">清除后无法撤销。</string>
+    <string name="dialog_blocked_title">空间能力不可用</string>
+    <string name="dialog_blocked_body">请在系统设置中允许平面识别和空间锚点。</string>
+
+    <!-- 提示条 -->
+    <string name="snack_scanning">慢慢看一圈桌子和地面</string>
+    <string name="snack_no_table">看看桌面，让它认出桌子</string>
+    <string name="snack_elsewhere">上次的工位不在这里</string>
+    <string name="snack_unsaved">没能保存</string>
+    <string name="snack_lost">定位丢失 · 环顾四周</string>
+    <string name="snack_cleared">已全部清除</string>
+    <string name="snack_restored">已找回上次的工位</string>
+    <string name="snack_limit_pins">最多 8 个钉</string>
+    <string name="snack_deleted">已删除</string>
+
+    <!-- 读数牌与标签 -->
+    <string name="plate_to_wall">离墙 %1$s</string>
+    <string name="plate_over_wall">伸展超墙 %1$s</string>
+    <string name="plate_edge">离桌边 %1$s</string>
+    <string name="plate_pin_short">超 %1$s</string>
+    <string name="hit_wall">碰墙</string>
+    <string name="hit_desk">碰桌</string>
+
+    <!-- 首次引导 -->
+    <string name="coach_hint">按住底座拖动 · 点姿势看它动</string>
+</resources>

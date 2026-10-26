@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- app icon background: warning orange, the factory's only orange-backed icon (design appIcon) -->
+    <color name="ic_launcher_background">#D9480F</color>
+</resources>

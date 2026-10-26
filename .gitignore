@@ -27,3 +27,6 @@ output.json
 # Session scratch
 .scratch/
 .kotlin/
+
+# Emulator harness runtime state
+tools/harness/.state/

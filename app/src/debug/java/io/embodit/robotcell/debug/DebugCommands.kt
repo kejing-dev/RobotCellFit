@@ -4,6 +4,7 @@ import android.content.Context
 import io.embodit.robotcell.domain.model.LanguagePref
 import io.embodit.robotcell.domain.model.Pose
 import io.embodit.robotcell.domain.model.UnitPref
+import io.embodit.robotcell.domain.model.Vec3
 import io.embodit.robotcell.platform.CellLog
 import io.embodit.robotcell.ui.cell.CellEvent
 import io.embodit.robotcell.ui.cell.Tab
@@ -30,6 +31,10 @@ import java.util.Locale
  *                              joint_1..6, joint_minus, joint_plus, joint_zero, clear_pins, menu_sphere, lang_*,
  *                              unit_cm, unit_in, menu_clear, menu_exit, dialog_cancel, dialog_confirm, dialog_exit,
  *                              dialog_retry, coach_got_it, snackbar_action)
+ * - v0.1.2: `goto S22..S25` (run tab, pin tour playing, TCP drag, virtual desk), `run pins|path|stop`,
+ *   `goto_pin [index]` (Go on the selected / given pin, 0-based), `select index`, `approach top|side`,
+ *   `point` / `path_clear` (teach / clear), `movel on|off`, `loop` (toggles), `grip`, `jog dx dy dz` (moves
+ *   the TCP by a world offset through IK, metres), `vroom on|off|here|size 0..2|height +-m`
  * - `dump`                     the whole model as one JSON line (`DUMP {...}`), also written to files/dump.json
  * - `hmd`, `bounds`, `planes`, `park`, `fps on|off`
  */
@@ -104,6 +109,37 @@ internal object DebugCommands {
             "planes" -> scene?.planesSummary()?.forEach { CellLog.i(it) } ?: CellLog.i(NO_SCENE)
             "park" -> CellLog.i(scene?.parkPanel() ?: NO_SCENE)
             "fps" -> CellLog.i(scene?.setFpsLine(first == "on") ?: NO_SCENE)
+            "run" ->
+                when (first) {
+                    "pins" -> host.dispatch(CellEvent.RunPinsClicked)
+                    "path" -> host.dispatch(CellEvent.PlayPathClicked)
+                    else -> host.dispatch(CellEvent.StopClicked)
+                }
+            "stop" -> host.dispatch(CellEvent.StopClicked)
+            "select" -> host.dispatch(CellEvent.DebugSelectPin(num(0, "i")?.toInt() ?: 0))
+            "goto_pin" -> {
+                num(0, "i")?.let { host.dispatch(CellEvent.DebugSelectPin(it.toInt())) }
+                host.dispatch(CellEvent.GoToPinClicked)
+            }
+            "approach" -> {
+                val want = if (first == "side") io.embodit.robotcell.domain.model.Approach.SIDE else io.embodit.robotcell.domain.model.Approach.TOP
+                if (host.dumpJson().contains("\"approach\":\"${want.tag}\"").not()) host.dispatch(CellEvent.ApproachToggled)
+            }
+            "point" -> host.dispatch(CellEvent.WaypointAdded)
+            "path_clear" -> host.dispatch(CellEvent.PathCleared)
+            "movel" -> host.dispatch(CellEvent.LinearSelected(first != "off"))
+            "loop" -> host.dispatch(CellEvent.LoopToggled)
+            "grip" -> host.dispatch(CellEvent.GripToggled)
+            "jog" -> host.dispatch(CellEvent.DebugJog(Vec3(num(0, "x") ?: 0f, num(1, "y") ?: 0f, num(2, "z") ?: 0f)))
+            "vroom" ->
+                when (first) {
+                    "on" -> host.dispatch(CellEvent.VirtualToggled(true))
+                    "off" -> host.dispatch(CellEvent.VirtualToggled(false))
+                    "here" -> host.dispatch(CellEvent.VirtualHereClicked)
+                    "size" -> host.dispatch(CellEvent.VirtualSizeSelected(num(1, "i")?.toInt() ?: 1))
+                    "height" -> host.dispatch(CellEvent.VirtualHeightStepped(num(1, "d") ?: 0.05f))
+                    else -> CellLog.i("CMD vroom needs on|off|here|size i|height d")
+                }
             else -> CellLog.i("CMD unknown '$name'")
         }
     }

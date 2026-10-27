@@ -7,6 +7,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import io.embodit.robotcell.data.AnchorOutcome
 import io.embodit.robotcell.data.AnchorPose
+import io.embodit.robotcell.domain.model.Approach
 import io.embodit.robotcell.domain.model.Gripper
 import io.embodit.robotcell.domain.model.LanguagePref
 import io.embodit.robotcell.domain.model.Mount
@@ -20,8 +21,15 @@ import io.embodit.robotcell.domain.model.StoredSession
 import io.embodit.robotcell.domain.model.SurfaceKind
 import io.embodit.robotcell.domain.model.UnitPref
 import io.embodit.robotcell.domain.model.Ur5e
+import io.embodit.robotcell.domain.model.Ur5eKinematics
 import io.embodit.robotcell.domain.model.Vec3
+import io.embodit.robotcell.domain.model.VirtualRoom
 import io.embodit.robotcell.domain.usecase.DiskGeometry
+import io.embodit.robotcell.domain.usecase.GraspUseCase
+import io.embodit.robotcell.domain.usecase.Move
+import io.embodit.robotcell.domain.usecase.MotionPlanner
+import io.embodit.robotcell.domain.usecase.PinPlan
+import io.embodit.robotcell.domain.usecase.Trajectory
 import io.embodit.robotcell.domain.usecase.LinkHit
 import io.embodit.robotcell.domain.usecase.PlaceRobotUseCase
 import io.embodit.robotcell.domain.usecase.ReachUseCase
@@ -60,6 +68,8 @@ class CellViewModel(private val appContext: Context) : ViewModel() {
     private val planeTracker = CellGraph.planes
     private val reach = ReachUseCase()
     private val placeRule = PlaceRobotUseCase(reach)
+    private val grasp = GraspUseCase(reach)
+    private val planner = MotionPlanner(grasp)
 
     private val _state = MutableStateFlow(CellUiState())
     val state: StateFlow<CellUiState> = _state.asStateFlow()
@@ -113,6 +123,22 @@ class CellViewModel(private val appContext: Context) : ViewModel() {
     private var forcedState: String? = null
     private var debugWallPlane: PlaneSurface? = null
 
+    // ---- v0.1.2: pins, auto run, jog, virtual room
+    private var selectedPin: String? = null
+    private val waypoints = ArrayList<FloatArray>()
+    private var motion: MotionUi? = null
+    private var motionSerial = 0
+    /** The program whose end pose is taken over when the scene reports it (-1: none, e.g. a manual pose replaced it). */
+    private var adoptSerial = -1
+    private var gripWidth = Gripper.STROKE_M
+    private var jogging = false
+    private var virtualRoom: VirtualRoom? = null
+    /** The virtual room was made by the scan timeout (it goes when a real desk turns up), not from the menu. */
+    private var virtualAuto = false
+    private var virtualSize = VirtualRoom.DEFAULT_SIZE
+    private var virtualJob: Job? = null
+    private val planCache = HashMap<String, Pair<String, PinPlan>>()
+
     // ---- derived geometry (recomputed when the robot, the pins or the planes change)
     private var disks: List<DiskGeometry> = emptyList()
     private var lastMarksKey = ""
@@ -152,6 +178,7 @@ class CellViewModel(private val appContext: Context) : ViewModel() {
             // ---- scene
             CellEvent.SceneReady -> {
                 sceneReady = true
+                scheduleVirtualRoom()
                 settle()
             }
             is CellEvent.PlanesChanged -> {
@@ -169,6 +196,12 @@ class CellViewModel(private val appContext: Context) : ViewModel() {
                         }
                     }
                 }
+                // a scanned desk replaces an automatic virtual room the robot is not standing on
+                if (virtualRoom != null && virtualAuto && realTableKnown() && robot?.tableId != VirtualRoom.TABLE_ID) {
+                    CellLog.i("VROOM removed: a desk was scanned")
+                    setVirtualRoom(null)
+                    showSnack(SnackKind.REAL_DESK)
+                }
                 recompute()
                 settle()
             }
@@ -185,8 +218,11 @@ class CellViewModel(private val appContext: Context) : ViewModel() {
             is CellEvent.PinTapped -> {
                 if (menuOpen) {
                     menuOpen = false
-                } else if (tab == Tab.PINS && robot != null) {
-                    removePin(event.id)
+                } else if (robot != null) {
+                    // v0.1.2: a tap selects the pin and shows its verdict (removing is a panel key)
+                    selectedPin = event.id
+                    if (tab != Tab.RUN) tab = Tab.PINS
+                    CellLog.i("PIN select id=${event.id} ${pinsUi.firstOrNull { it.id == event.id }?.let { "${it.level} ${it.plan.reasons}" }}")
                 }
                 publish()
             }
@@ -262,6 +298,120 @@ class CellViewModel(private val appContext: Context) : ViewModel() {
                 publish()
             }
             is CellEvent.PoseClicked -> setPose(event.pose, null)
+            CellEvent.ApproachToggled -> {
+                settings = settings.copy(approach = if (settings.approach == Approach.TOP) Approach.SIDE else Approach.TOP)
+                CellLog.i("PIN approach=${settings.approach.tag}")
+                recompute()
+                scheduleSave()
+                publish()
+            }
+            CellEvent.GoToPinClicked -> goToPin(selectedPin ?: pinsUi.firstOrNull { it.reachable }?.id)
+            CellEvent.RemovePinClicked -> {
+                val id = selectedPin ?: return
+                removePin(id)
+            }
+            CellEvent.RunPinsClicked -> runPins()
+            CellEvent.PlayPathClicked -> playPath()
+            CellEvent.StopClicked -> stopMotion()
+            CellEvent.WaypointAdded -> {
+                val r = robot ?: return
+                if (motion != null || waypoints.size >= MAX_WAYPOINTS) return
+                waypoints += r.joints.copyOf()
+                CellLog.i("PATH add n=${waypoints.size} joints=${r.joints.joinToString(",") { CellLog.f(it, 1) }}")
+                scheduleSave()
+                publish()
+            }
+            CellEvent.PathCleared -> {
+                if (motion?.kind == RunKind.PATH) stopMotion()
+                waypoints.clear()
+                CellLog.i("PATH clear")
+                scheduleSave()
+                publish()
+            }
+            is CellEvent.LinearSelected -> {
+                settings = settings.copy(linear = event.linear)
+                scheduleSave()
+                publish()
+            }
+            CellEvent.LoopToggled -> {
+                settings = settings.copy(loop = !settings.loop)
+                scheduleSave()
+                publish()
+            }
+            CellEvent.GripToggled -> {
+                if (motion != null || robot == null) return
+                gripWidth = if (gripWidth > Gripper.STROKE_M / 2f) 0f else Gripper.STROKE_M
+                CellLog.i("GRIP width=${CellLog.f(gripWidth)}")
+                publish()
+            }
+            is CellEvent.MotionEnded -> {
+                if (motion?.serial == event.serial) motion = null
+                if (event.serial == adoptSerial) {
+                    adoptSerial = -1
+                    robot = robot?.copy(joints = event.joints.copyOf())
+                    gripWidth = event.grip
+                    CellLog.i("RUN end serial=${event.serial} finished=${event.finished} joints=${event.joints.joinToString(",") { CellLog.f(it, 1) }}")
+                    recompute()
+                    scheduleSave()
+                }
+                publish()
+            }
+            CellEvent.JogStarted -> {
+                if (robot == null) return
+                pushUndo()
+                jogging = true
+                menuOpen = false
+                CellLog.i("JOG start")
+                publish()
+            }
+            is CellEvent.JogEnded -> {
+                val r = robot ?: return
+                jogging = false
+                robot = r.copy(joints = event.joints.copyOf())
+                CellLog.i("JOG end joints=${event.joints.joinToString(",") { CellLog.f(it, 1) }}")
+                recompute()
+                scheduleSave()
+                publish()
+            }
+            is CellEvent.VirtualToggled -> {
+                if (event.on) {
+                    virtualAuto = false
+                    setVirtualRoom(makeRoom())
+                } else {
+                    setVirtualRoom(null)
+                }
+                recompute()
+                publish()
+            }
+            is CellEvent.VirtualSizeSelected -> {
+                virtualSize = event.index.coerceIn(0, VirtualRoom.SIZES.size - 1)
+                val v = virtualRoom ?: return publish()
+                val (w, d) = VirtualRoom.SIZES[virtualSize]
+                moveVirtual(v.copy(width = w, depth = d))
+            }
+            is CellEvent.VirtualHeightStepped -> {
+                val v = virtualRoom ?: return
+                moveVirtual(v.copy(height = (v.height + event.deltaM).coerceIn(VirtualRoom.MIN_HEIGHT_M, VirtualRoom.MAX_HEIGHT_M)))
+            }
+            CellEvent.VirtualHereClicked -> {
+                val v = virtualRoom ?: return
+                val fresh = makeRoom()
+                moveVirtual(fresh.copy(width = v.width, depth = v.depth, height = v.height))
+            }
+            CellEvent.VirtualDeskDragStarted -> {
+                if (virtualRoom == null) return
+                cancelMotion()
+                pushUndo()
+                CellLog.i("VROOM drag start")
+            }
+            is CellEvent.VirtualDeskDragged -> {
+                val v = virtualRoom ?: return
+                moveVirtual(v.moved(event.delta))
+            }
+            CellEvent.VirtualDeskDragEnded -> {
+                virtualRoom?.let { CellLog.i("VROOM drag end centre=${CellLog.pos(it.deskCenter)}") }
+                scheduleSave()
+            }
             is CellEvent.JointSelected -> {
                 selectedJoint = event.index.coerceIn(0, 5)
                 publish()
@@ -366,6 +516,12 @@ class CellViewModel(private val appContext: Context) : ViewModel() {
                 if (event.lost != null) onEvent(CellEvent.TrackingChanged(event.lost))
             }
             CellEvent.DebugClear -> clearAll()
+            is CellEvent.DebugSelectPin -> {
+                selectedPin = pinsUi.getOrNull(event.index)?.id
+                if (tab != Tab.RUN) tab = Tab.PINS
+                publish()
+            }
+            is CellEvent.DebugJog -> debugJog(event.delta)
             is CellEvent.DebugDragging -> {
                 dragging = event.on && robot != null
                 recompute()
@@ -459,6 +615,7 @@ class CellViewModel(private val appContext: Context) : ViewModel() {
     }
 
     private fun placeRobot(placed: Robot, via: String) {
+        cancelMotion()
         pushUndo()
         robot = placed
         mode = Mode.PLACED
@@ -492,9 +649,10 @@ class CellViewModel(private val appContext: Context) : ViewModel() {
         pushUndo()
         val pin = Pin("p${uid++}", point, tableId)
         pins += pin
+        selectedPin = pin.id
         emit(CellUiEffect.Sound(SoundKind.PIN))
-        CellLog.i("PIN add id=${pin.id} at=${CellLog.pos(point)} reachable=${robot?.let { reach.pinReachable(it, point) }}")
         recompute()
+        CellLog.i("PIN add id=${pin.id} at=${CellLog.pos(point)} ${pinsUi.lastOrNull()?.let { "${it.level} ${it.plan.reasons} kappa=${CellLog.f(it.plan.kappa, 1)}" }}")
         scheduleSave()
         publish()
     }
@@ -504,6 +662,7 @@ class CellViewModel(private val appContext: Context) : ViewModel() {
         if (i < 0) return
         pushUndo()
         pins.removeAt(i)
+        if (selectedPin == id) selectedPin = pins.getOrNull(i)?.id ?: pins.lastOrNull()?.id
         CellLog.i("PIN remove id=$id")
         recompute()
         scheduleSave()
@@ -512,6 +671,7 @@ class CellViewModel(private val appContext: Context) : ViewModel() {
 
     private fun setPose(pose: Pose, freeze: Float?) {
         val r = robot ?: return
+        cancelMotion()
         pushUndo()
         robot = r.copy(joints = pose.joints.copyOf())
         animSerial++
@@ -534,6 +694,7 @@ class CellViewModel(private val appContext: Context) : ViewModel() {
 
     private fun setJoint(index: Int, degrees: Float) {
         val r = robot ?: return
+        cancelMotion()
         val joints = r.joints.copyOf()
         joints[index] = Ur5e.wrap(degrees).coerceIn(-180f, 180f)
         robot = r.copy(joints = joints)
@@ -548,6 +709,8 @@ class CellViewModel(private val appContext: Context) : ViewModel() {
         val r = robot ?: return
         deleted = Snapshot(r, pins.toList())
         undo.clear()
+        cancelMotion()
+        jogging = false
         robot = null
         pins.clear()
         hits = emptyList()
@@ -564,6 +727,7 @@ class CellViewModel(private val appContext: Context) : ViewModel() {
 
     private fun undoLast() {
         val s = undo.removeLastOrNull() ?: return
+        cancelMotion()
         robot = s.robot
         pins.clear()
         pins += s.pins
@@ -580,6 +744,10 @@ class CellViewModel(private val appContext: Context) : ViewModel() {
     }
 
     private fun clearAll() {
+        cancelMotion()
+        jogging = false
+        selectedPin = null
+        waypoints.clear()
         robot = null
         pins.clear()
         undo.clear()
@@ -680,8 +848,161 @@ class CellViewModel(private val appContext: Context) : ViewModel() {
         }
         wallVerdict = reach.wallVerdict(r, planes)
         deskPercent = table?.let { reach.deskPercent(r, it) }
-        pinsUi = pins.map { p -> PinUi(p.id, p.position, reach.pinReachable(r, p.position), reach.pinShortBy(r, p.position)) }
+        val planesKey = tables.joinToString(",") { System.identityHashCode(it).toString() } + "|" + walls.joinToString(",") { System.identityHashCode(it).toString() }
+        pinsUi = pins.mapIndexed { i, p -> PinUi(p.id, i + 1, p.position, planFor(r, p, planesKey)) }
+        planCache.keys.retainAll(pins.map { it.id }.toSet())
+        if (selectedPin != null && pins.none { it.id == selectedPin }) selectedPin = null
         edgeReadings = if (dragging && table != null) reach.edgeReadings(r, table) else emptyList()
+    }
+
+    /** The kinematic verdict of a pin, cached while the robot's placement, the pin, the approach and the planes stay the same. */
+    private fun planFor(r: Robot, p: Pin, planesKey: String): PinPlan {
+        val key =
+            String.format(Locale.US, "%.4f,%.4f,%.4f,%.4f,%s,%.3f,%.3f|%.4f,%.4f,%.4f|%s|", r.base.x, r.base.y, r.base.z, r.yaw, r.mount.tag, r.pedestalH, r.gripperM, p.position.x, p.position.y, p.position.z, settings.approach.tag) + planesKey
+        planCache[p.id]?.let { (k, plan) -> if (k == key) return plan }
+        val plan = grasp.plan(r, p.position, settings.approach, planes())
+        planCache[p.id] = key to plan
+        return plan
+    }
+
+    // =========================================================================================
+    // auto run (v0.1.2): go to a pin, the pin tour, the taught path
+    // =========================================================================================
+
+    private fun goToPin(id: String?) {
+        val r = robot ?: return
+        if (motion != null) return
+        val pin = pinsUi.firstOrNull { it.id == id } ?: return
+        selectedPin = pin.id
+        val g = pin.plan.grasp
+        if (g == null) {
+            showSnack(SnackKind.PIN_UNREACHABLE)
+            publish()
+            return
+        }
+        val pre = pin.plan.pre
+        val moves = ArrayList<Move>()
+        moves += Move.Grip(Gripper.STROKE_M)
+        if (pre != null) {
+            moves += Move.J(pre)
+            moves += Move.L(g)
+        } else {
+            moves += Move.J(g)
+        }
+        moves += Move.Grip(MotionPlanner.PIN_GRIP_M)
+        startMotion(RunKind.GOTO, planner.build(r, r.joints, gripWidth, moves), loop = false)
+    }
+
+    private fun runPins() {
+        val r = robot ?: return
+        if (motion != null) return
+        val f = Robot.forwardOf(r.yaw)
+        val side = Vec3.UP.cross(f)
+        // sweep from one side to the other around the base
+        val order =
+            pinsUi.filter { it.reachable && it.plan.grasp != null }.sortedBy { p ->
+                val d = p.position - r.base
+                kotlin.math.atan2(d.dot(side), d.dot(f))
+            }
+        if (order.isEmpty()) {
+            showSnack(SnackKind.RUN_NONE)
+            publish()
+            return
+        }
+        startMotion(RunKind.PINS, planner.pinTour(r, r.joints, order.map { it.plan }), loop = settings.loop)
+    }
+
+    private fun playPath() {
+        val r = robot ?: return
+        if (motion != null) return
+        val wps = if (waypoints.size >= 2) waypoints.map { it.copyOf() } else demoPath()
+        val loop = settings.loop
+        startMotion(RunKind.PATH, planner.path(r, r.joints, gripWidth, wps, settings.linear, loop), loop = loop)
+    }
+
+    /** With fewer than two taught points: a pick sweep in front of the robot (pick pose at J1 -45, 0, +45 degrees). */
+    private fun demoPath(): List<FloatArray> {
+        val pick = Pose.PICK.joints
+        return listOf(-45f, 0f, 45f, 0f).map { j1 -> pick.copyOf().also { it[0] = j1 } }
+    }
+
+    private fun startMotion(kind: RunKind, t: Trajectory, loop: Boolean) {
+        pushUndo()
+        val m = MotionUi(++motionSerial, kind, t, loop)
+        motion = m
+        adoptSerial = m.serial
+        menuOpen = false
+        if (t.fallbacks > 0) showSnack(SnackKind.RUN_FALLBACK)
+        CellLog.i("RUN start serial=${m.serial} kind=$kind samples=${t.size} ms=${t.durationMs} loop=$loop fallbacks=${t.fallbacks}")
+        publish()
+    }
+
+    /** Stop: the scene reports where the arm stopped and that pose is taken over. */
+    private fun stopMotion() {
+        val m = motion ?: return
+        motion = null
+        CellLog.i("RUN stop serial=${m.serial}")
+        publish()
+    }
+
+    /** A manual pose replaces the program: its end pose is not taken over. */
+    private fun cancelMotion() {
+        if (motion == null && adoptSerial < 0) return
+        motion = null
+        adoptSerial = -1
+    }
+
+    // =========================================================================================
+    // virtual room (factory rule D7)
+    // =========================================================================================
+
+    private fun realTableKnown(): Boolean = reach.tables(planeTracker.scanned).isNotEmpty()
+
+    private fun scheduleVirtualRoom() {
+        if (virtualJob != null || virtualRoom != null) return
+        virtualJob =
+            viewModelScope.launch {
+                delay(VIRTUAL_AFTER_MS)
+                virtualJob = null
+                if (virtualRoom == null && !realTableKnown()) {
+                    virtualAuto = true
+                    setVirtualRoom(makeRoom())
+                    showSnack(SnackKind.VIRTUAL_ROOM)
+                    publish()
+                }
+            }
+    }
+
+    private fun makeRoom(): VirtualRoom =
+        VirtualRoom.inFront(head ?: Vec3.ZERO, headForward, reach.floorY(planeTracker.scanned), virtualSize, virtualRoom?.height ?: VirtualRoom.DEFAULT_HEIGHT_M)
+
+    private fun setVirtualRoom(room: VirtualRoom?) {
+        virtualRoom = room
+        planeTracker.setVirtual(room?.planes() ?: emptyList())
+        CellLog.i("VROOM ${if (room == null) "off" else "on centre=${CellLog.pos(room.deskCenter)} size=${CellLog.f(room.width)}x${CellLog.f(room.depth)} height=${CellLog.f(room.height)} floor=${room.withFloor}"}")
+    }
+
+    /** Moves / resizes the virtual room; a robot and pins standing on the virtual desk travel with it. */
+    private fun moveVirtual(next: VirtualRoom) {
+        val old = virtualRoom ?: return
+        cancelMotion()
+        val shift = next.deskCenter - old.deskCenter
+        setVirtualRoom(next)
+        robot?.let { r ->
+            if (r.tableId == VirtualRoom.TABLE_ID && r.mount == Mount.DESK) {
+                robot = placeRule.constrain(r.copy(base = r.base + shift), planes())
+            }
+        }
+        for (i in pins.indices) {
+            val p = pins[i]
+            if (p.tableId == VirtualRoom.TABLE_ID) {
+                val f = reach.flat(next.table())
+                val q = f.to3(f.clampInside(f.to2(p.position + shift), 0.01f))
+                pins[i] = p.copy(position = Vec3(q.x, next.deskTopY, q.z))
+            }
+        }
+        recompute()
+        publish()
     }
 
     // =========================================================================================
@@ -733,7 +1054,7 @@ class CellViewModel(private val appContext: Context) : ViewModel() {
                 val origin = pose?.position ?: r.base
                 val inv = pose?.rotation?.conjugate()
                 fun rel(p: Vec3): Vec3 = inv?.rotate(p - origin) ?: (p - origin)
-                StoredCell(anchorId, rel(r.base), r.yaw, r.mount, r.pedestalH, r.gripperM, r.joints.copyOf(), pins.map { rel(it.position) }, r.base)
+                StoredCell(anchorId, rel(r.base), r.yaw, r.mount, r.pedestalH, r.gripperM, r.joints.copyOf(), pins.map { rel(it.position) }, r.base, waypoints.map { it.copyOf() })
             }
         val session = StoredSession(cell, settings)
         viewModelScope.launch { runCatching { repository.save(session) }.onFailure { CellLog.w("SAVE failed: $it") } }
@@ -790,6 +1111,8 @@ class CellViewModel(private val appContext: Context) : ViewModel() {
         val planes = planes()
         val table = if (s.mount == Mount.DESK) reach.nearestTable(base, planes, 0.5f) else reach.nearestTable(base, planes, 3f)
         robot = Robot(base, s.mount, s.yaw, s.pedestalH, s.gripperM, s.joints.copyOf(), table?.id)
+        waypoints.clear()
+        waypoints += s.waypoints.map { it.copyOf() }
         pins.clear()
         for (p in s.pins) pins += Pin("p${uid++}", abs(p), reach.nearestTable(abs(p), planes, 0.3f)?.id)
         mode = Mode.PLACED
@@ -841,7 +1164,9 @@ class CellViewModel(private val appContext: Context) : ViewModel() {
     // debug hooks
     // =========================================================================================
 
-    private fun firstTable(): PlaneSurface? = reach.tables(planes()).maxByOrNull { reach.flat(it).area }
+    /** The desk the debug hooks use: the virtual desk while it is on (it stands in front of the viewer), else the largest. */
+    private fun firstTable(): PlaneSurface? =
+        reach.tables(planes()).let { t -> t.firstOrNull { it.id == VirtualRoom.TABLE_ID } ?: t.maxByOrNull { reach.flat(it).area } }
 
     private fun debugPlace(surface: String, x: Float, z: Float, yawDeg: Float?) {
         val planes = planes()
@@ -891,6 +1216,25 @@ class CellViewModel(private val appContext: Context) : ViewModel() {
         publish()
     }
 
+    /** Moves the TCP by a world offset keeping the tool orientation (what a drag of the TCP ball does). */
+    private fun debugJog(delta: Vec3) {
+        val r = robot ?: return CellLog.i("CMD jog: no robot")
+        cancelMotion()
+        val t = grasp.tcpPose(r, r.joints)
+        val d = Ur5eKinematics.toDh(r.rotation.conjugate().rotate(delta))
+        val moved = Ur5eKinematics.Mat4(t.m.copyOf().also { it[3] += d[0]; it[7] += d[1]; it[11] += d[2] })
+        val sol = grasp.solveNear(r, moved, r.joints, 30f)
+        if (sol == null) {
+            CellLog.i("JOG debug no solution delta=${CellLog.pos(delta)}")
+            return
+        }
+        pushUndo()
+        robot = r.copy(joints = sol)
+        CellLog.i("JOG debug delta=${CellLog.pos(delta)} tcp=${CellLog.pos(grasp.tcpWorld(robot!!, sol))}")
+        recompute()
+        publish()
+    }
+
     private fun debugPin(x: Float, z: Float) {
         val r = robot ?: return CellLog.i("CMD pin: no robot")
         val table = r.tableId?.let { id -> planes().firstOrNull { it.id == id } } ?: firstTable() ?: return
@@ -923,8 +1267,11 @@ class CellViewModel(private val appContext: Context) : ViewModel() {
             tab = Tab.POSE
             // every designed state starts from the upright pose with no gripper (a previous S09 leaves the reach pose)
             robot?.let { r ->
-                if (!Ur5e.same(r.joints, Pose.UPRIGHT.joints) || r.gripperM != 0f) {
-                    robot = r.copy(joints = Pose.UPRIGHT.joints.copyOf(), gripperM = 0f)
+                cancelMotion()
+                jogging = false
+                gripWidth = Gripper.STROKE_M
+                if (!Ur5e.same(r.joints, Pose.UPRIGHT.joints) || r.gripperM != Gripper.TCP_M) {
+                    robot = r.copy(joints = Pose.UPRIGHT.joints.copyOf(), gripperM = Gripper.TCP_M)
                     animSerial++
                     freezeAt = null
                     posingUntilMs = NEVER
@@ -950,6 +1297,8 @@ class CellViewModel(private val appContext: Context) : ViewModel() {
             "S03" -> {
                 robot = null
                 pins.clear()
+                // S03 is aiming at a scanned desk: a virtual room left on would make it S25
+                if (virtualRoom != null && realTableKnown()) setVirtualRoom(null)
                 mode = Mode.AIMING
             }
             "S04" -> {
@@ -1013,11 +1362,11 @@ class CellViewModel(private val appContext: Context) : ViewModel() {
                 debugPin(f.x * 0.3f - side.x * 0.35f, f.z * 0.3f - side.z * 0.35f)
                 debugPin(f.x * 0.98f + side.x * 0.25f, f.z * 0.98f + side.z * 0.25f)
                 // a small desk may have no unreachable spot: the red pin then goes on the nearest other desk out of reach
-                if (pins.isNotEmpty() && reach.pinReachable(r, pins.last().position)) {
+                if (pins.isNotEmpty() && pinsUi.lastOrNull()?.reachable == true) {
                     val other =
                         reach.tables(planes())
                             .map { t -> t to reach.flat(t).centroid.let { c -> Vec3(c.x, t.maxY, c.z) } }
-                            .filter { (t, c) -> t.id != r.tableId && !reach.pinReachable(r, c) }
+                            .filter { (t, c) -> t.id != r.tableId && !grasp.plan(r, c, settings.approach, planes()).reachable }
                             .minByOrNull { (_, c) -> c.distanceTo(r.base) }
                     if (other != null) {
                         pins.removeAt(pins.size - 1)
@@ -1068,6 +1417,29 @@ class CellViewModel(private val appContext: Context) : ViewModel() {
                 ensureRobot()
                 coach = true
             }
+            "S22" -> {
+                ensureRobot()
+                tab = Tab.RUN
+            }
+            "S23" -> {
+                debugGoto("S11")
+                tab = Tab.RUN
+                runPins()
+            }
+            "S24" -> {
+                ensureRobot()
+                tab = Tab.RUN
+                jogging = true
+            }
+            "S25" -> {
+                robot = null
+                pins.clear()
+                virtualAuto = false
+                setVirtualRoom(makeRoom())
+                mode = Mode.AIMING
+                clearSnack(SnackKind.SCANNING)
+                showSnack(SnackKind.VIRTUAL_ROOM)
+            }
             else -> CellLog.i("CMD goto unknown $s")
         }
         if (s != "S19" && trackingLost) onEvent(CellEvent.DebugTracking(false))
@@ -1086,7 +1458,7 @@ class CellViewModel(private val appContext: Context) : ViewModel() {
         return when (mode) {
             Mode.STARTING -> "S01"
             Mode.SCANNING -> "S02"
-            Mode.AIMING -> if (snack?.kind == SnackKind.DELETED) "S15" else "S03"
+            Mode.AIMING -> if (snack?.kind == SnackKind.DELETED) "S15" else if (virtualRoom != null) "S25" else "S03"
             Mode.NO_TABLE -> if (snack?.kind == SnackKind.DELETED) "S15" else "S04"
             Mode.RESTORING -> "S16"
             Mode.ELSEWHERE -> "S18"
@@ -1097,7 +1469,10 @@ class CellViewModel(private val appContext: Context) : ViewModel() {
                     menuOpen -> "S13"
                     snack?.kind == SnackKind.RESTORED -> "S17"
                     coach -> "S21"
+                    jogging -> "S24"
+                    motion != null -> "S23"
                     dragging -> "S12"
+                    tab == Tab.RUN -> "S22"
                     tab == Tab.JOINTS -> "S10"
                     tab == Tab.PINS -> "S11"
                     posingUntilMs != NEVER && SystemClock.elapsedRealtime() < posingUntilMs -> "S08"
@@ -1163,6 +1538,16 @@ class CellViewModel(private val appContext: Context) : ViewModel() {
                 edgeReadings = edgeReadings,
                 disks = disks,
                 rings = rings,
+                selectedPin = selectedPin,
+                approach = settings.approach,
+                motion = motion,
+                waypoints = waypoints.size,
+                linear = settings.linear,
+                loop = settings.loop,
+                gripWidth = gripWidth,
+                jogging = jogging,
+                virtualRoom = virtualRoom,
+                virtualSize = virtualSize,
                 stateName = name,
             )
     }
@@ -1189,7 +1574,34 @@ class CellViewModel(private val appContext: Context) : ViewModel() {
         }
         o.put("deskPercent", deskPercent ?: JSONObject.NULL)
         wallVerdict?.let { w -> o.put("wall", JSONObject().put("d", w.d.toDouble()).put("r", w.r.toDouble()).put("over", w.over.toDouble())) }
-        o.put("pins", JSONArray().apply { pinsUi.forEach { put(JSONObject().put("id", it.id).put("pos", vec(it.position)).put("reachable", it.reachable)) } })
+        o.put(
+            "pins",
+            JSONArray().apply {
+                pinsUi.forEach { p ->
+                    put(
+                        JSONObject()
+                            .put("id", p.id)
+                            .put("n", p.number)
+                            .put("pos", vec(p.position))
+                            .put("level", p.level.name)
+                            .put("reasons", JSONArray().apply { p.plan.reasons.forEach { put(it.name) } })
+                            .put("kappa", if (p.plan.kappa.isFinite()) p.plan.kappa.toDouble() else -1.0)
+                            .put("wristDeg", p.plan.wristDeg.toDouble())
+                            .put("elbowDeg", p.plan.elbowDeg.toDouble())
+                            .put("shoulderM", p.plan.shoulderM.toDouble())
+                            .put("shortBy", p.plan.shortByM.toDouble())
+                            .put("grasp", p.plan.grasp?.let { g -> JSONArray().apply { g.forEach { put(it.toDouble()) } } } ?: JSONObject.NULL)
+                    )
+                }
+            },
+        )
+        o.put("selectedPin", selectedPin ?: JSONObject.NULL)
+        o.put("approach", settings.approach.tag)
+        o.put("motion", motion?.let { JSONObject().put("serial", it.serial).put("kind", it.kind.name).put("samples", it.trajectory.size).put("loop", it.loop).put("fallbacks", it.trajectory.fallbacks) } ?: JSONObject.NULL)
+        o.put("waypoints", waypoints.size)
+        o.put("grip", gripWidth.toDouble())
+        o.put("jogging", jogging)
+        o.put("virtual", virtualRoom?.let { JSONObject().put("centre", vec(it.deskCenter)).put("w", it.width.toDouble()).put("d", it.depth.toDouble()).put("h", it.height.toDouble()).put("auto", virtualAuto) } ?: JSONObject.NULL)
         o.put("hits", JSONArray().apply { hits.forEach { put(JSONObject().put("segment", it.segment).put("kind", it.kind.name)) } })
         o.put("anchor", anchorId ?: JSONObject.NULL)
         o.put("snack", snack?.kind?.name ?: JSONObject.NULL)
@@ -1216,5 +1628,9 @@ class CellViewModel(private val appContext: Context) : ViewModel() {
         private const val SAVE_DEBOUNCE_MS = 500L
         private const val RESTORE_TIMEOUT_MS = 10_000L
         private const val BLOCK_GRACE_MS = 4000L
+        private const val MAX_WAYPOINTS = 12
+
+        /** No desk this long after the scene is up: the virtual room stands in (factory rule D7: about 5 s). */
+        private const val VIRTUAL_AFTER_MS = 5000L
     }
 }

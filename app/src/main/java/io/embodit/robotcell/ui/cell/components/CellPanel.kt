@@ -35,11 +35,16 @@ import com.pico.spatial.ui.design.SliderDefaults
 import com.pico.spatial.ui.design.Text
 import androidx.compose.foundation.background
 import io.embodit.robotcell.R
+import io.embodit.robotcell.domain.model.Approach
 import io.embodit.robotcell.domain.model.Mount
 import io.embodit.robotcell.domain.model.Pose
 import io.embodit.robotcell.ui.cell.CellEvent
 import io.embodit.robotcell.ui.cell.CellUiState
+import io.embodit.robotcell.domain.usecase.PinLevel
+import io.embodit.robotcell.domain.usecase.PinReason
 import io.embodit.robotcell.ui.cell.Mode
+import io.embodit.robotcell.ui.cell.PinUi
+import io.embodit.robotcell.ui.cell.RunKind
 import io.embodit.robotcell.ui.cell.Tab
 import io.embodit.robotcell.ui.cell.WallState
 import io.embodit.robotcell.ui.cell.debug.probe
@@ -115,10 +120,10 @@ internal fun CellPanel(state: CellUiState, filled: Boolean, onEvent: (CellEvent)
         VerdictRow(state)
         // row 3: tabs
         Segments(
-            items = listOf("tab_pose" to rs(R.string.tab_pose), "tab_joints" to rs(R.string.tab_joints), "tab_pins" to rs(R.string.tab_pins)),
+            items = listOf("tab_pose" to rs(R.string.tab_pose), "tab_joints" to rs(R.string.tab_joints), "tab_pins" to rs(R.string.tab_pins), "tab_run" to rs(R.string.tab_run)),
             selected = state.tab.ordinal,
             onSelect = { onEvent(CellEvent.TabSelected(Tab.entries[it])) },
-            itemWidth = 120.dp,
+            itemWidth = 90.dp,
             height = 40.dp,
         )
         // content 136
@@ -127,6 +132,7 @@ internal fun CellPanel(state: CellUiState, filled: Boolean, onEvent: (CellEvent)
                 Tab.POSE -> PoseGrid(r.pose, disabled, onEvent)
                 Tab.JOINTS -> JointsTab(state, disabled, onEvent)
                 Tab.PINS -> PinsTab(state, disabled, onEvent)
+                Tab.RUN -> RunTab(state, disabled, onEvent)
             }
         }
         // hint line (factory rule D1)
@@ -145,7 +151,7 @@ internal fun CellPanel(state: CellUiState, filled: Boolean, onEvent: (CellEvent)
             val g = r.robot.gripperM
             WordButton(
                 "gripper",
-                if (g < 0.005f) rs(R.string.gripper_none) else rs(R.string.gripper_len, fmtLen(g, state.units)),
+                if (g < 0.005f) rs(R.string.gripper_none) else rs(R.string.gripper_len, rs(R.string.gripper_2f)),
                 { onEvent(CellEvent.GripperCycled) },
                 enabled = !disabled,
                 minWidth = 128.dp,
@@ -289,19 +295,162 @@ private fun ColumnScope.JointsTab(state: CellUiState, disabled: Boolean, onEvent
     }
 }
 
-/** The pins tab: this tab is the pinning mode (design `tabs.pins`). */
+/**
+ * The pins tab (v0.1.2): tapping the desk drops a pin, tapping a pin selects it. The selected pin's verdict
+ * (traffic light + reason, from IK, joint limits, singularities and collisions) and its metrics; the approach
+ * (from top / from side), Go (the arm moves there and closes the fingers), remove, clear.
+ */
 @Composable
 private fun ColumnScope.PinsTab(state: CellUiState, disabled: Boolean, onEvent: (CellEvent) -> Unit) {
-    Text(text = rs(R.string.pins_hint), color = PicoTheme.colorScheme.labelPrimary, style = CellType.body, maxLines = 1, overflow = TextOverflow.Ellipsis)
     val v = state.verdict
-    Text(
-        text = if (v.pinsTotal == 0) rs(R.string.pins_none) else rs(R.string.pins_count, v.pinsTotal, v.pinsOk),
-        color = PicoTheme.colorScheme.labelPrimary,
-        style = CellType.title,
-        maxLines = 1,
-    )
-    WordButton("clear_pins", rs(R.string.action_clear_pins), { onEvent(CellEvent.ClearPinsClicked) }, enabled = v.pinsTotal > 0 && !disabled, minWidth = 140.dp, iconRes = R.drawable.ic_trash)
+    val sel = state.selected
+    Row(modifier = Modifier.fillMaxWidth().height(40.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (sel == null) {
+            Text(text = if (v.pinsTotal == 0) rs(R.string.pins_hint) else rs(R.string.pin_none_selected), color = PicoTheme.colorScheme.labelPrimary, style = CellType.body, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        } else {
+            Chip(
+                iconRes = levelIcon(sel.level),
+                label = rs(R.string.pin_label, sel.number) + " · " + reasonText(sel, state),
+                value = null,
+                color = levelColor(sel.level),
+            )
+        }
+    }
+    Row(modifier = Modifier.fillMaxWidth().height(24.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        val metrics =
+            if (sel != null && sel.plan.grasp != null) {
+                rs(R.string.pin_metrics, fmtDeg(sel.plan.wristDeg), fmtDeg(sel.plan.elbowDeg), String.format(java.util.Locale.US, "%.1f", sel.plan.kappa))
+            } else {
+                if (v.pinsTotal == 0) rs(R.string.pins_none) else rs(R.string.pins_count, v.pinsTotal, v.pinsOk)
+            }
+        Text(text = metrics, color = PicoTheme.colorScheme.labelSecondary, style = CellType.figure, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+    Row(modifier = Modifier.fillMaxWidth().height(KeyHeight), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        WordButton(
+            "pin_approach",
+            if (state.approach == Approach.TOP) rs(R.string.approach_top) else rs(R.string.approach_side),
+            { onEvent(CellEvent.ApproachToggled) },
+            enabled = !disabled && !state.running,
+            minWidth = 120.dp,
+        )
+        WordButton("pin_go", rs(R.string.action_go), { onEvent(CellEvent.GoToPinClicked) }, primary = true, enabled = !disabled && !state.running && (sel?.reachable ?: (v.pinsOk > 0)), minWidth = 96.dp)
+        Spacer(modifier = Modifier.weight(1f))
+        Key("pin_remove", R.drawable.ic_trash, rs(R.string.action_remove_pin), enabled = sel != null && !disabled) { onEvent(CellEvent.RemovePinClicked) }
+        Key("clear_pins", R.drawable.ic_close, rs(R.string.action_clear_pins), enabled = v.pinsTotal > 0 && !disabled) { onEvent(CellEvent.ClearPinsClicked) }
+    }
 }
+
+/**
+ * The run tab (v0.1.2): run the reachable pins (pre-grasp MoveJ, MoveL down, close, MoveL up, open), play the
+ * taught path (MoveJ / MoveL, loop), stop, open / close the fingers; teach a point (the current pose), clear.
+ * Dragging the yellow ball at the fingertips moves the arm by inverse kinematics.
+ */
+@Composable
+private fun ColumnScope.RunTab(state: CellUiState, disabled: Boolean, onEvent: (CellEvent) -> Unit) {
+    val running = state.running
+    Row(modifier = Modifier.fillMaxWidth().height(KeyHeight), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        WordButton("run_pins", rs(R.string.action_run_pins), { onEvent(CellEvent.RunPinsClicked) }, primary = !running, enabled = !disabled && !running && state.verdict.pinsOk > 0, minWidth = 112.dp, iconRes = R.drawable.ic_play)
+        WordButton("run_path", rs(R.string.action_play_path), { onEvent(CellEvent.PlayPathClicked) }, enabled = !disabled && !running, minWidth = 112.dp, iconRes = R.drawable.ic_play)
+        Spacer(modifier = Modifier.weight(1f))
+        Key("run_stop", R.drawable.ic_stop, rs(R.string.action_stop), enabled = running) { onEvent(CellEvent.StopClicked) }
+        Key("run_grip", R.drawable.ic_grip, rs(R.string.action_grip), enabled = !disabled && !running && (state.robot?.robot?.gripperM ?: 0f) > 0.005f) { onEvent(CellEvent.GripToggled) }
+    }
+    Row(modifier = Modifier.fillMaxWidth().height(KeyHeight), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        WordButton("run_point", rs(R.string.action_add_point, state.waypoints + 1), { onEvent(CellEvent.WaypointAdded) }, enabled = !disabled && !running && state.waypoints < 12, minWidth = 96.dp, iconRes = R.drawable.ic_point)
+        Segments(
+            items = listOf("move_j" to rs(R.string.move_j), "move_l" to rs(R.string.move_l)),
+            selected = if (state.linear) 1 else 0,
+            onSelect = { onEvent(CellEvent.LinearSelected(it == 1)) },
+            itemWidth = 60.dp,
+            height = 40.dp,
+        )
+        Spacer(modifier = Modifier.weight(1f))
+        ToggleKey("run_loop", R.drawable.ic_loop, rs(R.string.action_loop), on = state.loop, enabled = !disabled) { onEvent(CellEvent.LoopToggled) }
+        Key("run_clear", R.drawable.ic_close, rs(R.string.action_clear_path), enabled = state.waypoints > 0 && !disabled) { onEvent(CellEvent.PathCleared) }
+    }
+    val m = state.motion
+    val status =
+        when {
+            m?.kind == RunKind.PINS -> rs(R.string.run_playing_pins, state.verdict.pinsOk)
+            m?.kind == RunKind.PATH -> rs(R.string.run_playing_path)
+            m?.kind == RunKind.GOTO -> rs(R.string.run_playing_goto, state.selected?.number ?: 0)
+            state.waypoints >= 2 -> rs(R.string.run_idle_points, state.waypoints) + " · " + rs(R.string.run_hint)
+            else -> rs(R.string.run_hint)
+        }
+    Text(text = status, color = PicoTheme.colorScheme.labelSecondary, style = CellType.figure, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.fillMaxWidth().height(24.dp))
+}
+
+/** A [Key] that shows an on state (the interaction tint behind the icon). */
+@Composable
+private fun ToggleKey(name: String, iconRes: Int, description: String, on: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    val content = if (!enabled) PicoTheme.colorScheme.labelQuaternary else if (on) PicoTheme.colorScheme.interaction else PicoTheme.colorScheme.labelPrimaryLight
+    com.pico.spatial.ui.design.IconButton(
+        onClick = onClick,
+        modifier = Modifier.probe(name, onClick),
+        colors =
+            com.pico.spatial.ui.design.IconButtonDefaults.iconButtonColors(
+                containerColor = if (on) PicoTheme.colorScheme.interaction.copy(alpha = 0.32f) else PicoTheme.colorScheme.fillPrimary,
+                contentColor = content,
+            ),
+        size = com.pico.spatial.ui.design.IconButtonDefaults.iconButtonSize(width = KeyWidth, height = KeyHeight),
+        enabled = enabled,
+    ) {
+        Icon(painter = painterResource(iconRes), contentDescription = description, modifier = Modifier.size(24.dp), tint = content)
+    }
+}
+
+@Composable
+internal fun levelColor(level: PinLevel): Color =
+    when (level) {
+        PinLevel.GREEN -> PicoTheme.colorScheme.passable
+        PinLevel.AMBER -> PicoTheme.colorScheme.alert
+        PinLevel.RED -> PicoTheme.colorScheme.error
+    }
+
+internal fun levelIcon(level: PinLevel): Int =
+    when (level) {
+        PinLevel.GREEN -> R.drawable.ic_check
+        PinLevel.AMBER -> R.drawable.ic_half
+        PinLevel.RED -> R.drawable.ic_cross
+    }
+
+/** The long reason of a pin's verdict (the panel chip). */
+@Composable
+internal fun reasonText(pin: PinUi, state: CellUiState): String =
+    when (pin.reason) {
+        PinReason.OK -> rs(R.string.reason_ok)
+        PinReason.OUT_OF_REACH -> if (pin.shortByM > 0.005f) rs(R.string.reason_out_of_reach, fmtLen(pin.shortByM, state.units)) else rs(R.string.reason_out_of_reach_short)
+        PinReason.INNER_VOID -> rs(R.string.reason_inner_void)
+        PinReason.ORIENTATION -> rs(R.string.reason_orientation)
+        PinReason.HITS_DESK -> rs(R.string.reason_hits_desk)
+        PinReason.HITS_WALL -> rs(R.string.reason_hits_wall)
+        PinReason.SELF_HIT -> rs(R.string.reason_self_hit)
+        PinReason.WRIST_SINGULAR -> rs(R.string.reason_wrist)
+        PinReason.ELBOW_STRETCHED -> rs(R.string.reason_elbow)
+        PinReason.SHOULDER_SINGULAR -> rs(R.string.reason_shoulder)
+        PinReason.ILL_CONDITIONED -> rs(R.string.reason_conditioning)
+        PinReason.NEAR_LIMIT -> rs(R.string.reason_limit)
+        PinReason.NO_STRAIGHT_APPROACH -> rs(R.string.reason_no_straight)
+    }
+
+/** The short reason on a pin's plate. */
+@Composable
+internal fun plateReason(pin: PinUi, state: CellUiState): String =
+    when (pin.reason) {
+        PinReason.OK -> rs(R.string.reason_ok)
+        PinReason.OUT_OF_REACH -> if (pin.shortByM > 0.005f) rs(R.string.plate_pin_short, fmtLen(pin.shortByM, state.units)) else rs(R.string.reason_out_of_reach_short)
+        PinReason.INNER_VOID -> rs(R.string.plate_reason_void)
+        PinReason.ORIENTATION -> rs(R.string.plate_reason_orient)
+        PinReason.HITS_DESK -> rs(R.string.plate_reason_desk)
+        PinReason.HITS_WALL -> rs(R.string.plate_reason_wall)
+        PinReason.SELF_HIT -> rs(R.string.plate_reason_self)
+        PinReason.WRIST_SINGULAR -> rs(R.string.plate_reason_wrist)
+        PinReason.ELBOW_STRETCHED -> rs(R.string.plate_reason_elbow)
+        PinReason.SHOULDER_SINGULAR -> rs(R.string.plate_reason_shoulder)
+        PinReason.ILL_CONDITIONED -> rs(R.string.plate_reason_cond)
+        PinReason.NEAR_LIMIT -> rs(R.string.plate_reason_limit)
+        PinReason.NO_STRAIGHT_APPROACH -> rs(R.string.plate_reason_straight)
+    }
 
 /** A SegmentControl of [itemWidth] x [height] items. */
 @Composable

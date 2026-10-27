@@ -47,13 +47,13 @@
     <string name="action_plus5">+5°</string>
 
     <!-- pins -->
-    <string name="pins_hint">Tap the desk to drop a pin, tap a pin to remove it</string>
+    <string name="pins_hint">Tap the desk to drop a pin · tap a pin to check it</string>
     <string name="pins_count">%1$d pins · %2$d in reach</string>
     <string name="pins_none">No pins yet</string>
     <string name="action_clear_pins">Clear pins</string>
 
     <!-- bottom row -->
-    <string name="gripper_none">Gripper none</string>
+    <string name="gripper_none">No tool</string>
     <string name="gripper_len">Gripper %1$s</string>
     <string name="hint_stick">Turn with the stick · hold the base to move</string>
     <string name="action_rot_ccw">Turn left 15°</string>
@@ -111,4 +111,66 @@
 
     <!-- coachmark -->
     <string name="coach_hint">Hold the base to move · tap a pose to see it move</string>
+    <!-- v0.1.2: gripper, pins with kinematics, auto run, virtual room -->
+    <string name="tab_run">Run</string>
+    <string name="gripper_2f">2F-85</string>
+    <string name="pin_label">Pin %1$d</string>
+    <string name="pin_none_selected">Tap a pin to check it</string>
+    <string name="approach_top">From top</string>
+    <string name="approach_side">From side</string>
+    <string name="action_go">Go</string>
+    <string name="action_remove_pin">Remove pin</string>
+    <string name="pin_metrics">J5 %1$s · elbow %2$s · κ %3$s</string>
+    <string name="reason_ok">Reachable</string>
+    <string name="reason_out_of_reach">%1$s out of reach</string>
+    <string name="reason_out_of_reach_short">Out of reach</string>
+    <string name="reason_inner_void">Too close to the base</string>
+    <string name="reason_orientation">Can\'t point the tool there</string>
+    <string name="reason_hits_desk">Arm hits a desk</string>
+    <string name="reason_hits_wall">Arm hits the wall</string>
+    <string name="reason_self_hit">Arm hits itself</string>
+    <string name="reason_wrist">Near wrist singularity</string>
+    <string name="reason_elbow">Arm nearly stretched</string>
+    <string name="reason_shoulder">Near shoulder singularity</string>
+    <string name="reason_conditioning">Poorly conditioned</string>
+    <string name="reason_limit">Near a joint limit</string>
+    <string name="reason_no_straight">No straight approach</string>
+    <string name="plate_reason_wrist">Wrist singular</string>
+    <string name="plate_reason_elbow">Stretched</string>
+    <string name="plate_reason_shoulder">Shoulder singular</string>
+    <string name="plate_reason_desk">Hits desk</string>
+    <string name="plate_reason_wall">Hits wall</string>
+    <string name="plate_reason_self">Self-hit</string>
+    <string name="plate_reason_void">Too close</string>
+    <string name="plate_reason_orient">Tool can\'t point</string>
+    <string name="plate_reason_limit">Joint limit</string>
+    <string name="plate_reason_straight">No straight path</string>
+    <string name="plate_reason_cond">Ill-conditioned</string>
+    <string name="action_run_pins">Run pins</string>
+    <string name="action_play_path">Play path</string>
+    <string name="action_stop">Stop</string>
+    <string name="action_add_point">Point %1$d</string>
+    <string name="action_grip">Open / close fingers</string>
+    <string name="action_loop">Loop</string>
+    <string name="action_clear_path">Clear path</string>
+    <string name="move_j">MoveJ</string>
+    <string name="move_l">MoveL</string>
+    <string name="run_hint">Pinch the yellow ball at the fingers and drag · the arm follows (IK)</string>
+    <string name="run_playing_pins">Running %1$d pins</string>
+    <string name="run_playing_path">Playing path</string>
+    <string name="run_playing_goto">Going to pin %1$d</string>
+    <string name="run_idle_points">%1$d points taught</string>
+    <string name="run_idle_demo">No points: plays a demo sweep</string>
+    <string name="snack_virtual_room">No desk found · virtual desk in front of you</string>
+    <string name="snack_real_desk">Desk found · virtual desk removed</string>
+    <string name="snack_run_none">No reachable pin to run</string>
+    <string name="snack_pin_unreachable">That pin can\'t be reached</string>
+    <string name="snack_run_fallback">Some MoveL ran as MoveJ</string>
+    <string name="menu_virtual">Virtual desk</string>
+    <string name="menu_virtual_size">Size</string>
+    <string name="menu_virtual_height">Height</string>
+    <string name="menu_virtual_here">Move here</string>
+    <string name="vsize_s">S</string>
+    <string name="vsize_m">M</string>
+    <string name="vsize_l">L</string>
 </resources>

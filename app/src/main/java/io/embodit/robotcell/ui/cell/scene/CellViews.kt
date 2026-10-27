@@ -8,6 +8,7 @@ import io.embodit.robotcell.domain.model.Quat4
 import io.embodit.robotcell.domain.model.Ur5e
 import io.embodit.robotcell.domain.model.Vec3
 import io.embodit.robotcell.domain.usecase.DiskGeometry
+import io.embodit.robotcell.domain.usecase.PinLevel
 import io.embodit.robotcell.domain.usecase.WallRing
 import io.embodit.robotcell.ui.cell.PinUi
 import kotlin.math.floor
@@ -192,10 +193,11 @@ internal class LandingRing(parent: Entity, private val m: SceneMaterials, mesh: 
     fun destroy() = runCatching { entity.destroy(true) }
 }
 
-/** Up to eight target pins (design `entities3d.pin`): stem, head, a 6 cm tap box. */
+/** Up to eight target pins (design `entities3d.pin`): stem, head, a 6 cm tap box. Head colour = the kinematic verdict (v0.1.2). */
 internal class PinViews(private val parent: Entity, private val m: SceneMaterials, private val stemMesh: MeshResource, private val headMesh: MeshResource) {
-    private class PinEntity(val root: Entity, val head: Entity, var id: String?, var reachable: Boolean?) {
+    private class PinEntity(val root: Entity, val head: Entity, var id: String?, var level: PinLevel?) {
         var position: Vec3 = Vec3.ZERO
+        var selected = false
     }
 
     private val pool = ArrayList<PinEntity>()
@@ -221,7 +223,7 @@ internal class PinViews(private val parent: Entity, private val m: SceneMaterial
         }
     }
 
-    fun sync(pins: List<PinUi>) {
+    fun sync(pins: List<PinUi>, selectedId: String?) {
         for ((i, slot) in pool.withIndex()) {
             val pin = pins.getOrNull(i)
             if (pin == null) {
@@ -235,9 +237,15 @@ internal class PinViews(private val parent: Entity, private val m: SceneMaterial
             slot.position = pin.position
             if (slot.id == null) slot.root.enabled = true
             slot.id = pin.id
-            if (slot.reachable != pin.reachable) {
-                slot.reachable = pin.reachable
-                slot.head.setMaterial(if (pin.reachable) m.pinOk else m.pinBad)
+            if (slot.level != pin.level) {
+                slot.level = pin.level
+                slot.head.setMaterial(materialOf(pin.level))
+            }
+            val sel = pin.id == selectedId
+            if (slot.selected != sel) {
+                slot.selected = sel
+                val r = if (sel) HEAD_R * 1.6f else HEAD_R
+                slot.head.setLocal(position = Vec3(0f, STEM_H, 0f), scale = Vec3(r, r, r))
             }
         }
     }
@@ -259,9 +267,16 @@ internal class PinViews(private val parent: Entity, private val m: SceneMaterial
     fun setMaterials(stale: Boolean) {
         for (slot in pool) {
             if (slot.id == null) continue
-            slot.head.setMaterial(if (stale) m.stale else if (slot.reachable == true) m.pinOk else m.pinBad)
+            slot.head.setMaterial(if (stale) m.stale else materialOf(slot.level ?: PinLevel.RED))
         }
     }
+
+    private fun materialOf(level: PinLevel) =
+        when (level) {
+            PinLevel.GREEN -> m.pinOk
+            PinLevel.AMBER -> m.pinWarn
+            PinLevel.RED -> m.pinBad
+        }
 
     fun destroy() {
         pool.forEach { runCatching { it.root.destroy(true) } }

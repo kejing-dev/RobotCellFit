@@ -18,12 +18,15 @@ import com.pico.spatial.ui.foundation.gesture.SpatialDragValue
 import com.pico.spatial.ui.foundation.gesture.SpatialTapValue
 import com.pico.spatial.ui.geometry.Offset3D
 import io.embodit.robotcell.domain.model.Mount
+import io.embodit.robotcell.domain.model.Ur5eKinematics
+import io.embodit.robotcell.domain.model.VirtualRoom
 import io.embodit.robotcell.domain.model.PointerRay
 import io.embodit.robotcell.domain.model.Quat4
 import io.embodit.robotcell.domain.model.Robot
 import io.embodit.robotcell.domain.model.SurfaceKind
 import io.embodit.robotcell.domain.model.Ur5e
 import io.embodit.robotcell.domain.model.Vec3
+import io.embodit.robotcell.domain.usecase.GraspUseCase
 import io.embodit.robotcell.domain.usecase.HitSurfaceUseCase
 import io.embodit.robotcell.domain.usecase.LinkHit
 import io.embodit.robotcell.domain.usecase.PlaceRobotUseCase
@@ -35,6 +38,7 @@ import io.embodit.robotcell.platform.tracking.HeadPose
 import io.embodit.robotcell.ui.cell.CellEvent
 import io.embodit.robotcell.ui.cell.CellUiState
 import io.embodit.robotcell.ui.cell.Mode
+import io.embodit.robotcell.ui.cell.MotionUi
 import io.embodit.robotcell.ui.cell.Tab
 import io.embodit.robotcell.ui.cell.WallState
 import io.embodit.robotcell.ui.cell.debug.CellProbe
@@ -87,6 +91,7 @@ class CellScene(private val sink: (CellEvent) -> Unit) : CellProbe.SceneProbe {
     private val reach = ReachUseCase()
     private val placeRule = PlaceRobotUseCase(reach)
     private val hits = HitSurfaceUseCase()
+    private val grasp = GraspUseCase(reach)
 
     private var content: SpatialViewContent? = null
     private var stageRoot: Entity? = null
@@ -105,6 +110,8 @@ class CellScene(private val sink: (CellEvent) -> Unit) : CellProbe.SceneProbe {
     private var pins: PinViews? = null
     private var wallTape: TapeView? = null
     private var edgeTapes: List<TapeView> = emptyList()
+    private var tcpHandle: TcpHandle? = null
+    private var vroom: VirtualRoomView? = null
     private var attached = false
 
     private val follower = Follower("cell", MAIN_OFFSET, MAIN_HALF_EXTENTS, MAIN_LEAN)
@@ -143,6 +150,21 @@ class CellScene(private val sink: (CellEvent) -> Unit) : CellProbe.SceneProbe {
     // thumbstick
     private var stickActive = false
     private var lastStickMs = NEVER
+
+    // v0.1.2: program playback, the finger opening, the TCP drag (inverse kinematics per move), the virtual desk drag
+    private var playing: MotionUi? = null
+    private var playStartMs = NEVER
+    /** After a stop: the model's joints at that moment; the shown pose is kept until the ViewModel takes it over. */
+    private var holdFrom: FloatArray? = null
+    private var shownGrip = 0.085f
+    private var gripTarget = 0.085f
+    private var gripPresent = true
+    private var gripSent = -1f
+    private var jogActive = false
+    private var jogOk = true
+    private var jogTarget = Vec3.ZERO
+    private var jogPose: Ur5eKinematics.Mat4? = null
+    private var deskDragging = false
 
     private var fpsOn = false
     private var framesCount = 0
@@ -232,7 +254,8 @@ class CellScene(private val sink: (CellEvent) -> Unit) : CellProbe.SceneProbe {
             }
         val cylinder = mesh("unitCylinder") { MeshFactory.cylinder(1f, 1f, "unitCylinder", segments = 24) }
         val ball = mesh("unitSphere") { CellMeshes.unitSphere("unitSphere") }
-        val rm = RobotMeshes(cylinder, ball)
+        val box = mesh("unitBox") { MeshFactory.box(Vec3(1f, 1f, 1f)) }
+        val rm = RobotMeshes(cylinder, ball, box)
         robotMeshes = rm
         meshTurn()
         robot = RobotView(root, m, rm, ghost = false).also { it.setShown(false) }
@@ -253,6 +276,9 @@ class CellScene(private val sink: (CellEvent) -> Unit) : CellProbe.SceneProbe {
         val band = mesh("band") { MeshFactory.unitBand("band") }
         wallTape = TapeView(root, m, band, yellow = false, name = "wallTape")
         edgeTapes = listOf(TapeView(root, m, band, yellow = true, name = "edgeTape0"), TapeView(root, m, band, yellow = true, name = "edgeTape1"))
+        meshTurn()
+        tcpHandle = TcpHandle(root, m, ball)
+        vroom = VirtualRoomView(root, m, rm)
         CellGraph.anchors.start()
         attached = true
         CellLog.i("SCENE attached build_ms=${SystemClock.elapsedRealtime() - t0}")
@@ -338,6 +364,8 @@ class CellScene(private val sink: (CellEvent) -> Unit) : CellProbe.SceneProbe {
         pins?.destroy()
         wallTape?.destroy()
         edgeTapes.forEach { it.destroy() }
+        tcpHandle?.destroy()
+        vroom?.destroy()
         colliders?.clear()
         runCatching { stageRoot?.destroy(true) }
         runCatching { contentProbe?.destroy(true) }
@@ -358,6 +386,13 @@ class CellScene(private val sink: (CellEvent) -> Unit) : CellProbe.SceneProbe {
         pins = null
         wallTape = null
         edgeTapes = emptyList()
+        tcpHandle = null
+        vroom = null
+        playing = null
+        holdFrom = null
+        jogActive = false
+        deskDragging = false
+        gripSent = -1f
         robotMeshes = null
         hasHead = false
         lastPlaneCount = -1
@@ -379,8 +414,11 @@ class CellScene(private val sink: (CellEvent) -> Unit) : CellProbe.SceneProbe {
         if (!attached) return
         val robotView = robot ?: return
         val r = state.robot
+        syncMotion(state, previous)
+        vroom?.set(state.virtualRoom)
         if (r == null) {
             robotView.setShown(false)
+            tcpHandle?.setShown(false)
             sphere?.set(Vec3.ZERO, 1f, shown = false)
             baseMarks?.setDeadZone(null, 0f)
             baseMarks?.setPedestal(null, 0f, 0f)
@@ -397,6 +435,7 @@ class CellScene(private val sink: (CellEvent) -> Unit) : CellProbe.SceneProbe {
             robotView.place(rb.mountPoint, rb.yaw)
             if (r.animSerial != animSerialSeen) {
                 animSerialSeen = r.animSerial
+                holdFrom = null
                 if (force || previous.robot == null) {
                     shownJoints = rb.joints.copyOf()
                     animStartMs = NEVER
@@ -407,11 +446,21 @@ class CellScene(private val sink: (CellEvent) -> Unit) : CellProbe.SceneProbe {
                     animFreeze = r.freezeAt
                 }
                 poseDirty = true
-            } else if (animStartMs == NEVER && !Ur5e.same(shownJoints, rb.joints)) {
-                // the joint slider: immediate
-                shownJoints = rb.joints.copyOf()
-                poseDirty = true
+            } else if (animStartMs == NEVER && playing == null && !jogActive && !Ur5e.same(shownJoints, rb.joints)) {
+                val hold = holdFrom
+                if (hold != null && Ur5e.same(rb.joints, hold)) {
+                    // stopped program: keep the shown pose until the ViewModel takes it over
+                } else {
+                    // the joint slider: immediate
+                    holdFrom = null
+                    shownJoints = rb.joints.copyOf()
+                    poseDirty = true
+                }
+            } else if (holdFrom != null && Ur5e.same(shownJoints, rb.joints)) {
+                holdFrom = null
             }
+            gripPresent = rb.gripperM > 0.005f
+            if (playing == null && holdFrom == null) gripTarget = state.gripWidth
             if (force || previous.robot?.robot !== rb) poseDirty = true
             sphere?.set(rb.shoulder, rb.reachRadius(), shown = state.showSphere && !state.trackingLost)
             baseMarks?.setDeadZone(rb.mountPoint, rb.yaw)
@@ -421,9 +470,63 @@ class CellScene(private val sink: (CellEvent) -> Unit) : CellProbe.SceneProbe {
         marks?.setRings(if (r == null) emptyList() else state.rings)
         marks?.setShown(!state.trackingLost)
         robotView.setTone(if (state.trackingLost) RobotView.Tone.GREY else RobotView.Tone.NORMAL)
-        pins?.sync(state.pins)
+        pins?.sync(state.pins, state.selectedPin)
         if (previous.trackingLost != state.trackingLost || force) pins?.setMaterials(state.trackingLost)
         syncPanels(state)
+    }
+
+    /** Starts the state's program, or ends the one playing when the state dropped it (Stop, a manual pose). */
+    private fun syncMotion(state: CellUiState, previous: CellUiState) {
+        val want = state.motion
+        val cur = playing
+        if (want?.serial == cur?.serial) return
+        if (cur != null) endPlay(cur, finished = false, modelJoints = previous.robot?.robot?.joints)
+        if (want != null && state.robot != null) {
+            playing = want
+            playStartMs = SystemClock.elapsedRealtime()
+            animStartMs = NEVER
+            holdFrom = null
+            CellLog.i("RUN play serial=${want.serial} kind=${want.kind} samples=${want.trajectory.size} loop=${want.loop}")
+        }
+    }
+
+    /** Stops playback where it is and reports the pose (posted: never re-enter the ViewModel from its own publish). */
+    private fun endPlay(m: MotionUi, finished: Boolean, modelJoints: FloatArray?) {
+        if (playing?.serial == m.serial) playing = null
+        holdFrom = (modelJoints ?: ui.robot?.robot?.joints)?.copyOf()
+        val joints = shownJoints.copyOf()
+        val grip = shownGrip
+        gripTarget = grip
+        main.post { sink(CellEvent.MotionEnded(m.serial, joints, grip, finished)) }
+    }
+
+    /** Playback of the program: one sample per [Trajectory.stepMs], looping from `loopFrom`. */
+    private fun playFrame(now: Long) {
+        val m = playing ?: return
+        val t = m.trajectory
+        if (t.size == 0) {
+            endPlay(m, finished = true, modelJoints = null)
+            return
+        }
+        val elapsed = ((now - playStartMs) / t.stepMs).toInt()
+        var idx = elapsed
+        var done = false
+        if (idx >= t.size) {
+            val span = t.size - t.loopFrom - 1
+            if (m.loop && span > 0) idx = t.loopFrom + 1 + (idx - t.size) % span
+            else {
+                idx = t.size - 1
+                done = true
+            }
+        }
+        shownJoints = t.joints[idx]
+        shownGrip = t.grip[idx]
+        gripTarget = shownGrip
+        poseDirty = true
+        if (done) {
+            CellLog.i("RUN finished serial=${m.serial}")
+            endPlay(m, finished = true, modelJoints = null)
+        }
     }
 
     private fun syncPanels(state: CellUiState) {
@@ -472,7 +575,7 @@ class CellScene(private val sink: (CellEvent) -> Unit) : CellProbe.SceneProbe {
         runMeshWork(now)
         rig.stowBehind(head.view)
         val state = ui
-        val hold = panelPressed || (lastPanelPressMs != NEVER && now - lastPanelPressMs < PANEL_HOLD_MS) || state.menuOpen || state.dialog != null || dragging
+        val hold = panelPressed || (lastPanelPressMs != NEVER && now - lastPanelPressMs < PANEL_HOLD_MS) || state.menuOpen || state.dialog != null || dragging || jogActive || deskDragging
         if (hasHead && head.position.length > 1e-3f) follower.follow(head, planeTracker.all, planeTracker.count, now, hold)
         placeFamily(state, rig)
         countFrame(now)
@@ -515,6 +618,15 @@ class CellScene(private val sink: (CellEvent) -> Unit) : CellProbe.SceneProbe {
         val robotView = robot ?: return
         val r = state.robot?.robot
         if (r == null) return
+        playFrame(now)
+        if (abs(shownGrip - gripTarget) > 1e-4f) {
+            shownGrip += (gripTarget - shownGrip) * GRIP_EASE
+            if (abs(shownGrip - gripTarget) < 5e-4f) shownGrip = gripTarget
+        }
+        if (abs(shownGrip - gripSent) > 1e-4f || poseDirty) {
+            gripSent = shownGrip
+            robotView.setGripper(gripPresent, shownGrip)
+        }
         if (animStartMs != NEVER) {
             val from = animFrom
             val to = animTo
@@ -542,6 +654,16 @@ class CellScene(private val sink: (CellEvent) -> Unit) : CellProbe.SceneProbe {
                 robotView.setHits(found.map { it.segment }.toSet())
                 CellLog.i("HIT ${if (found.isEmpty()) "none" else found.joinToString { "${Ur5e.SEGMENT_NAMES[minOf(it.segment, 6)]}:${it.kind}" }}")
                 sink(CellEvent.HitsChanged(found))
+            }
+        }
+        // the TCP handle rides on the fingertips (on the hand's point while a drag has no solution)
+        tcpHandle?.let { h ->
+            val show = state.placed && !state.trackingLost && playing == null
+            h.setShown(show)
+            if (show) {
+                val tcp = r.mountPoint + r.rotation.rotate(Ur5e.tip(frames, r.gripperM))
+                h.place(if (jogActive && !jogOk) jogTarget else tcp)
+                h.setState(reachable = !jogActive || jogOk, active = jogActive || state.jogging)
             }
         }
         // too close: the whole robot at 40 % while the head is within 0.25 m of any segment
@@ -664,7 +786,10 @@ class CellScene(private val sink: (CellEvent) -> Unit) : CellProbe.SceneProbe {
         }
         // pins out of reach: a plate above each (pins tab only, nearest four)
         val pinPlates = PanelSpec.pinPlates
-        val shortPins = if (state.tab == Tab.PINS && state.mode == Mode.PLACED) state.pins.withIndex().filter { !it.value.reachable }.take(pinPlates.size) else emptyList()
+        val shortPins =
+            if ((state.tab == Tab.PINS || state.tab == Tab.RUN) && state.mode == Mode.PLACED) {
+                state.pins.withIndex().filter { it.value.level != io.embodit.robotcell.domain.usecase.PinLevel.GREEN }.sortedBy { if (it.value.id == state.selectedPin) 0 else 1 }.take(pinPlates.size)
+            } else emptyList()
         for ((k, id) in pinPlates.withIndex()) {
             val p = shortPins.getOrNull(k)
             if (p == null) {
@@ -773,7 +898,27 @@ class CellScene(private val sink: (CellEvent) -> Unit) : CellProbe.SceneProbe {
         when (phase) {
             "start" -> {
                 val target = value.targetEntity ?: return
+                if (colliders?.planeIdOf(target) == VirtualRoom.TABLE_ID && ui.virtualRoom != null) {
+                    val c = ui.virtualRoom!!.deskCenter
+                    dragPxToM = PX_M * (0.67f + 1.186f * head.position.distanceTo(c).coerceAtLeast(0.3f))
+                    deskDragging = true
+                    CellLog.i("DRAG vdesk start")
+                    sink(CellEvent.VirtualDeskDragStarted)
+                    return
+                }
                 val r = ui.robot?.robot ?: return
+                if (tcpHandle?.isHandle(target) == true) {
+                    if (playing != null || ui.trackingLost) return
+                    val tcp = r.mountPoint + r.rotation.rotate(Ur5e.tip(frames, r.gripperM))
+                    dragPxToM = PX_M * (0.67f + 1.186f * head.position.distanceTo(tcp).coerceAtLeast(0.3f))
+                    jogActive = true
+                    jogOk = true
+                    jogTarget = tcp
+                    jogPose = grasp.tcpPose(r, shownJoints)
+                    CellLog.i("JOG drag start tcp=${CellLog.pos(tcp)}")
+                    sink(CellEvent.JogStarted)
+                    return
+                }
                 if (robot?.isGrab(target) != true) return
                 val dist = head.position.distanceTo(r.mountPoint).coerceAtLeast(0.3f)
                 dragPxToM = PX_M * (0.67f + 1.186f * dist)
@@ -782,6 +927,17 @@ class CellScene(private val sink: (CellEvent) -> Unit) : CellProbe.SceneProbe {
                 sink(CellEvent.DragStarted)
             }
             "move" -> {
+                if (jogActive) {
+                    jogMove(value)
+                    return
+                }
+                if (deskDragging) {
+                    val amount = value.dragAmount
+                    val right = Vec3(head.right.x, 0f, head.right.z).let { if (it.length < 0.1f) Vec3.RIGHT else it.normalized() }
+                    val fwd = Vec3(head.forward.x, 0f, head.forward.z).let { if (it.length < 0.1f) Vec3.AHEAD else it.normalized() }
+                    sink(CellEvent.VirtualDeskDragged(right * (amount.x * dragPxToM) - fwd * (amount.y * dragPxToM)))
+                    return
+                }
                 if (!dragging) return
                 val amount = value.dragAmount
                 val right = Vec3(head.right.x, 0f, head.right.z).let { if (it.length < 0.1f) Vec3.RIGHT else it.normalized() }
@@ -790,11 +946,50 @@ class CellScene(private val sink: (CellEvent) -> Unit) : CellProbe.SceneProbe {
                 sink(CellEvent.DragMoved(delta))
             }
             "end", "cancel" -> {
+                if (jogActive) {
+                    jogActive = false
+                    jogPose = null
+                    CellLog.i("JOG drag end ok=$jogOk joints=${shownJoints.joinToString(",") { CellLog.f(it, 1) }}")
+                    sink(CellEvent.JogEnded(shownJoints.copyOf()))
+                    return
+                }
+                if (deskDragging) {
+                    deskDragging = false
+                    CellLog.i("DRAG vdesk end")
+                    sink(CellEvent.VirtualDeskDragEnded)
+                    return
+                }
                 if (!dragging) return
                 dragging = false
                 CellLog.i("DRAG end")
                 sink(CellEvent.DragEnded)
             }
+        }
+    }
+
+    /**
+     * One move of the TCP drag: the hand's travel (right / up / towards-away of the head, the base drag's
+     * pixel scale) moves the target point; the arm follows by closed-form IK nearest the shown pose, keeping
+     * the tool orientation of the drag start. No solution (or a flip of more than 30 degrees): the arm stays,
+     * the handle shows the hand's point in red.
+     */
+    private fun jogMove(value: SpatialDragValue) {
+        val r = ui.robot?.robot ?: return
+        val start = jogPose ?: return
+        val amount = value.dragAmount
+        val right = head.right.let { if (it.length < 0.1f) Vec3.RIGHT else it.normalized() }
+        val up = Vec3.UP
+        val fwd = Vec3(head.forward.x, 0f, head.forward.z).let { if (it.length < 0.1f) Vec3.AHEAD else it.normalized() }
+        jogTarget = jogTarget + right * (amount.x * dragPxToM) - up * (amount.y * dragPxToM) - fwd * (amount.z * dragPxToM)
+        val local = Ur5eKinematics.toDh(r.rotation.conjugate().rotate(jogTarget - r.mountPoint))
+        val pose = Ur5eKinematics.Mat4(start.m.copyOf().also { it[3] = local[0]; it[7] = local[1]; it[11] = local[2] })
+        val sol = grasp.solveNear(r, pose, shownJoints, JOG_MAX_JUMP_DEG)
+        val ok = sol != null
+        if (ok != jogOk) CellLog.i("JOG ${if (ok) "ok" else "no solution"} at=${CellLog.pos(jogTarget)}")
+        jogOk = ok
+        if (sol != null) {
+            shownJoints = sol
+            poseDirty = true
         }
     }
 
@@ -820,7 +1015,7 @@ class CellScene(private val sink: (CellEvent) -> Unit) : CellProbe.SceneProbe {
     // =========================================================================================
 
     override fun poseLine(): String =
-        "POSE hmd pos=${CellLog.pos5(head.position)} ${CellLog.quat5(head.rotation)} fwd=${CellLog.pos5(head.forward)} valid=$hasHead joints=${shownJoints.joinToString(",") { CellLog.f(it, 1) }}"
+        "POSE hmd pos=${CellLog.pos5(head.position)} ${CellLog.quat5(head.rotation)} fwd=${CellLog.pos5(head.forward)} valid=$hasHead joints=${shownJoints.joinToString(",") { CellLog.f(it, 1) }} grip=${CellLog.f(shownGrip)} playing=${playing?.serial} jog=$jogActive"
 
     override fun panelLines(): List<String> {
         val rig = rig ?: return emptyList()
@@ -856,6 +1051,8 @@ class CellScene(private val sink: (CellEvent) -> Unit) : CellProbe.SceneProbe {
         private const val STICK_DEAD = 0.15f
         private const val STICK_RATE_RAD_S = 1.0472f
         private const val PLATE_LIFT_M = 0.04f
+        private const val GRIP_EASE = 0.18f
+        private const val JOG_MAX_JUMP_DEG = 30f
         private const val MESH_PER_FRAME = 2
         private const val FAST_FRAME_MS = 40L
         private const val SLOW_MESH_GAP_MS = 1500L

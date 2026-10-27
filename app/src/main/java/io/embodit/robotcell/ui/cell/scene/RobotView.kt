@@ -4,6 +4,7 @@ import com.pico.spatial.core.ecs.Entity
 import com.pico.spatial.core.ecs.ModelEntity
 import com.pico.spatial.core.ecs.resource.Material
 import com.pico.spatial.core.ecs.resource.MeshResource
+import io.embodit.robotcell.domain.model.Gripper
 import io.embodit.robotcell.domain.model.Quat4
 import io.embodit.robotcell.domain.model.Ur5e
 import io.embodit.robotcell.domain.model.Vec3
@@ -28,6 +29,8 @@ internal class RobotView(parent: Entity, private val m: SceneMaterials, private 
     private var tone = Tone.NORMAL
     private var hits: Set<Int> = emptySet()
     private var shown = true
+    private val gripper: GripperView? = if (ghost) null else GripperView(root, m, meshes)
+    private var lastFrames: Array<Ur5e.Frame>? = null
     /** The drag target entity (null on the ghost). */
     var grab: Entity? = null
         private set
@@ -90,6 +93,8 @@ internal class RobotView(parent: Entity, private val m: SceneMaterials, private 
 
     /** Writes the transforms of every part for the FK [frames] (robot local frame). */
     fun setPose(frames: Array<Ur5e.Frame>) {
+        lastFrames = frames
+        gripper?.setPose(frames[6])
         val up = Vec3.UP
         for (p in parts) {
             when (p.kind) {
@@ -147,6 +152,14 @@ internal class RobotView(parent: Entity, private val m: SceneMaterials, private 
         refreshMaterials()
     }
 
+    /** Finger opening (0 ... 85 mm) and whether the gripper is mounted at all. */
+    fun setGripper(present: Boolean, widthM: Float) {
+        val g = gripper ?: return
+        g.setPresent(present)
+        g.setWidth(widthM)
+        lastFrames?.let { g.setPose(it[6]) }
+    }
+
     /** Segments (0..6) that collide: they are drawn in the error colour. */
     fun setHits(value: Set<Int>) {
         if (hits == value) return
@@ -161,6 +174,7 @@ internal class RobotView(parent: Entity, private val m: SceneMaterials, private 
 
     private fun refreshMaterials() {
         for (p in parts) p.entity.setMaterial(mat(p.segment, p.kind))
+        gripper?.setLook(if (tone == Tone.GREY) GripperView.Look.GREY else if (6 in hits) GripperView.Look.HIT else GripperView.Look.NORMAL)
     }
 
     private fun mat(segment: Int, kind: Part.Kind): Material =
@@ -183,4 +197,141 @@ internal class RobotView(parent: Entity, private val m: SceneMaterials, private 
 }
 
 /** Unit meshes shared by the robot and the ghost. */
-internal class RobotMeshes(val cylinder: MeshResource, val sphere: MeshResource)
+internal class RobotMeshes(val cylinder: MeshResource, val sphere: MeshResource, val box: MeshResource)
+
+/**
+ * A 1:1 two-finger adaptive gripper of the Robotiq 2F-85 class on tool0 (v0.1.2): a 75 mm coupling, an
+ * 85 x 62 x 90 mm body, two outer finger links and two rubber pads that slide apart to the opening. Flange
+ * to fingertips 172 mm, the TCP ([Gripper.TCP_M]) between the fingertips. Tool frame: z along the approach,
+ * x the finger travel. Children of the robot root, so a pose change only writes transforms.
+ */
+internal class GripperView(root: Entity, private val m: SceneMaterials, meshes: RobotMeshes) {
+    enum class Look { NORMAL, HIT, GREY }
+
+    private val coupling = ModelEntity(meshes.cylinder, m.joint).named("robot:gripCoupling")
+    private val body = ModelEntity(meshes.box, m.gripper).named("robot:gripBody")
+    private val links = List(2) { ModelEntity(meshes.box, m.gripper).named("robot:gripLink$it") }
+    private val pads = List(2) { ModelEntity(meshes.box, m.pad).named("robot:gripPad$it") }
+    private var width = Gripper.STROKE_M
+    private var present = true
+    private var look = Look.NORMAL
+
+    init {
+        root.addChild(coupling)
+        root.addChild(body)
+        links.forEach { root.addChild(it) }
+        pads.forEach { root.addChild(it) }
+    }
+
+    fun setPresent(value: Boolean) {
+        if (present == value) return
+        present = value
+        coupling.enabled = value
+        body.enabled = value
+        links.forEach { it.enabled = value }
+        pads.forEach { it.enabled = value }
+    }
+
+    fun setWidth(value: Float) {
+        width = value.coerceIn(0f, Gripper.STROKE_M)
+    }
+
+    fun setLook(value: Look) {
+        if (look == value) return
+        look = value
+        val main = when (value) {
+            Look.NORMAL -> m.gripper
+            Look.HIT -> m.hit
+            Look.GREY -> m.stale
+        }
+        body.setMaterial(main)
+        links.forEach { it.setMaterial(main) }
+        coupling.setMaterial(if (value == Look.GREY) m.stale else m.joint)
+        pads.forEach { it.setMaterial(if (value == Look.GREY) m.stale else m.pad) }
+    }
+
+    /** Places every part on the flange frame [f] (robot local). */
+    fun setPose(f: Ur5e.Frame) {
+        if (!present) return
+        val rot = Quat4.fromBasis(f.x.normalized(), f.y.normalized(), f.z.normalized())
+        fun at(x: Float, z: Float): Vec3 = f.origin + f.x * x + f.z * z
+        coupling.setLocal(position = f.origin, rotation = Quat4.fromTo(Vec3.UP, f.z.normalized()), scale = Vec3(COUPLING_R, COUPLING_H, COUPLING_R))
+        body.setLocal(position = at(0f, COUPLING_H + BODY_H / 2f), rotation = rot, scale = Vec3(BODY_W, BODY_D, BODY_H))
+        val half = width / 2f
+        for (s in 0..1) {
+            val sign = if (s == 0) -1f else 1f
+            links[s].setLocal(position = at(sign * (half + LINK_W / 2f + PAD_W), LINK_Z0 + LINK_H / 2f), rotation = rot, scale = Vec3(LINK_W, LINK_D, LINK_H))
+            pads[s].setLocal(position = at(sign * (half + PAD_W / 2f), PAD_Z0 + PAD_H / 2f), rotation = rot, scale = Vec3(PAD_W, PAD_D, PAD_H))
+        }
+    }
+
+    companion object {
+        const val COUPLING_R = 0.0375f
+        const val COUPLING_H = 0.012f
+        const val BODY_W = 0.085f
+        const val BODY_D = 0.062f
+        const val BODY_H = 0.090f
+        const val LINK_Z0 = COUPLING_H + BODY_H
+        const val LINK_W = 0.012f
+        const val LINK_D = 0.030f
+        const val LINK_H = 0.046f
+        const val PAD_W = 0.009f
+        const val PAD_D = 0.022f
+        const val PAD_H = 0.030f
+        /** Pads from 142 to 172 mm: the TCP at 170 mm sits between the fingertips. */
+        const val PAD_Z0 = 0.142f
+    }
+}
+
+/**
+ * The TCP handle (v0.1.2): a yellow ball at the fingertip midpoint with a larger tap box. Pinch and drag it
+ * and the arm follows by inverse kinematics; it turns red where there is no solution.
+ */
+internal class TcpHandle(parent: Entity, private val m: SceneMaterials, mesh: MeshResource) {
+    val root: Entity = Entity().named("robot:tcp")
+    private val ball = ModelEntity(mesh, m.handle).named("robot:tcpBall")
+    val tap: Entity = Entity().named("robot:tcpTap")
+    private var on = true
+    private var ok = true
+    private var big = false
+
+    init {
+        parent.addChild(root)
+        ball.setLocal(scale = Vec3(R, R, R))
+        root.addChild(ball)
+        tap.tapBox(Vec3(TAP_M, TAP_M, TAP_M))
+        root.addChild(tap)
+        setShown(false)
+    }
+
+    fun isHandle(entity: Entity): Boolean = entity.id == tap.id || entity.id == ball.id
+
+    fun setShown(value: Boolean) {
+        if (on == value) return
+        on = value
+        root.enabled = value
+    }
+
+    fun place(at: Vec3) {
+        root.setLocal(position = at)
+    }
+
+    fun setState(reachable: Boolean, active: Boolean) {
+        if (reachable != ok) {
+            ok = reachable
+            ball.setMaterial(if (reachable) m.handle else m.handleBad)
+        }
+        if (active != big) {
+            big = active
+            val r = if (active) R * 1.4f else R
+            ball.setLocal(scale = Vec3(r, r, r))
+        }
+    }
+
+    fun destroy() = runCatching { root.destroy(true) }
+
+    companion object {
+        const val R = 0.018f
+        const val TAP_M = 0.07f
+    }
+}

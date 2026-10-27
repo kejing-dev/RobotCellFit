@@ -1,5 +1,6 @@
 package io.embodit.robotcell.ui.cell
 
+import io.embodit.robotcell.domain.model.Approach
 import io.embodit.robotcell.domain.model.BlockReason
 import io.embodit.robotcell.domain.model.LanguagePref
 import io.embodit.robotcell.domain.model.Mount
@@ -7,9 +8,14 @@ import io.embodit.robotcell.domain.model.Pose
 import io.embodit.robotcell.domain.model.Robot
 import io.embodit.robotcell.domain.model.UnitPref
 import io.embodit.robotcell.domain.model.Vec3
+import io.embodit.robotcell.domain.model.VirtualRoom
 import io.embodit.robotcell.domain.usecase.DiskGeometry
 import io.embodit.robotcell.domain.usecase.HitKind
 import io.embodit.robotcell.domain.usecase.LinkHit
+import io.embodit.robotcell.domain.usecase.PinLevel
+import io.embodit.robotcell.domain.usecase.PinPlan
+import io.embodit.robotcell.domain.usecase.PinReason
+import io.embodit.robotcell.domain.usecase.Trajectory
 import io.embodit.robotcell.domain.usecase.WallRing
 import io.embodit.robotcell.domain.usecase.WallVerdict
 
@@ -31,7 +37,10 @@ enum class Mode {
     ELSEWHERE,
 }
 
-enum class Tab { POSE, JOINTS, PINS }
+enum class Tab { POSE, JOINTS, PINS, RUN }
+
+/** What the auto run is playing. */
+enum class RunKind { PINS, PATH, GOTO }
 
 enum class DialogKind { CLEAR, UNAVAILABLE }
 
@@ -48,6 +57,16 @@ enum class SnackKind(val durationMs: Long, val hasAction: Boolean = false) {
     RESTORED(3000L),
     LIMIT_PINS(3000L),
     DELETED(6000L, hasAction = true),
+    /** No desk after the scan timeout: a virtual room stands in (factory rule D7). */
+    VIRTUAL_ROOM(6000L),
+    /** A desk was scanned: the virtual room is gone. */
+    REAL_DESK(3000L),
+    /** Run pins with no reachable pin. */
+    RUN_NONE(3000L),
+    /** Go to a pin that has no solution. */
+    PIN_UNREACHABLE(3000L),
+    /** Some MoveL segments ran as MoveJ (no straight-line path). */
+    RUN_FALLBACK(4000L),
 }
 
 data class SnackUi(val id: Int, val kind: SnackKind)
@@ -65,7 +84,23 @@ data class VerdictUi(
     val pinsTotal: Int,
 )
 
-data class PinUi(val id: String, val position: Vec3, val reachable: Boolean, val shortByM: Float)
+/** A pin with its kinematic verdict (v0.1.2): [number] is its 1-based label. */
+data class PinUi(val id: String, val number: Int, val position: Vec3, val plan: PinPlan) {
+    val reachable: Boolean
+        get() = plan.reachable
+
+    val level: PinLevel
+        get() = plan.level
+
+    val reason: PinReason
+        get() = plan.reason
+
+    val shortByM: Float
+        get() = plan.shortByM
+}
+
+/** A program for the scene to play; a new [serial] starts it, [loop] repeats it from `trajectory.loopFrom`. */
+class MotionUi(val serial: Int, val kind: RunKind, val trajectory: Trajectory, val loop: Boolean)
 
 /** What the scene needs of the robot plus the animation request. */
 data class RobotUi(
@@ -117,6 +152,18 @@ data class CellUiState(
     val edgeReadings: List<Pair<Vec3, Float>> = emptyList(),
     val disks: List<DiskGeometry> = emptyList(),
     val rings: List<WallRing> = emptyList(),
+    // ---- v0.1.2: pins, auto run, gripper, virtual room
+    val selectedPin: String? = null,
+    val approach: Approach = Approach.TOP,
+    val motion: MotionUi? = null,
+    val waypoints: Int = 0,
+    val linear: Boolean = false,
+    val loop: Boolean = true,
+    /** Finger opening while no program plays, metres. */
+    val gripWidth: Float = 0.085f,
+    val jogging: Boolean = false,
+    val virtualRoom: VirtualRoom? = null,
+    val virtualSize: Int = VirtualRoom.DEFAULT_SIZE,
     /** The design's state id of the moment (S01 ... S21), for logs and QA. */
     val stateName: String = "S01",
 ) {
@@ -132,6 +179,12 @@ data class CellUiState(
 
     val collides: Boolean
         get() = hits.isNotEmpty()
+
+    val running: Boolean
+        get() = motion != null
+
+    val selected: PinUi?
+        get() = pins.firstOrNull { it.id == selectedPin }
 }
 
 sealed interface CellUiEffect {
@@ -221,6 +274,51 @@ sealed interface CellEvent {
 
     data class SphereToggled(val on: Boolean) : CellEvent
 
+    // ---- v0.1.2: pins, auto run, jog, virtual room
+    data object ApproachToggled : CellEvent
+
+    data object GoToPinClicked : CellEvent
+
+    data object RemovePinClicked : CellEvent
+
+    data object RunPinsClicked : CellEvent
+
+    data object PlayPathClicked : CellEvent
+
+    data object StopClicked : CellEvent
+
+    data object WaypointAdded : CellEvent
+
+    data object PathCleared : CellEvent
+
+    data class LinearSelected(val linear: Boolean) : CellEvent
+
+    data object LoopToggled : CellEvent
+
+    data object GripToggled : CellEvent
+
+    /** The scene stopped or finished program [serial] at [joints] with the fingers at [grip]. */
+    data class MotionEnded(val serial: Int, val joints: FloatArray, val grip: Float, val finished: Boolean) : CellEvent
+
+    data object JogStarted : CellEvent
+
+    /** The TCP drag ended; the arm stands at [joints] (solved per frame in the scene). */
+    data class JogEnded(val joints: FloatArray) : CellEvent
+
+    data class VirtualToggled(val on: Boolean) : CellEvent
+
+    data class VirtualSizeSelected(val index: Int) : CellEvent
+
+    data class VirtualHeightStepped(val deltaM: Float) : CellEvent
+
+    data object VirtualHereClicked : CellEvent
+
+    data object VirtualDeskDragStarted : CellEvent
+
+    data class VirtualDeskDragged(val delta: Vec3) : CellEvent
+
+    data object VirtualDeskDragEnded : CellEvent
+
     // ---- lifecycle
     data object WentBackground : CellEvent
 
@@ -244,4 +342,9 @@ sealed interface CellEvent {
     data object DebugClear : CellEvent
 
     data class DebugDragging(val on: Boolean) : CellEvent
+
+    data class DebugSelectPin(val index: Int) : CellEvent
+
+    /** Moves the TCP by a world offset through IK, as a drag would (metres). */
+    data class DebugJog(val delta: Vec3) : CellEvent
 }

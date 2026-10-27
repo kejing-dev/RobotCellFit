@@ -53,13 +53,35 @@ enum class Pose(val tag: String, val joints: FloatArray) {
     }
 }
 
-/** Gripper length cycle: none / 10 / 15 / 20 cm (design `rules.gripper`). */
+/**
+ * The end effector (v0.1.2): a 1:1 two-finger adaptive gripper of the Robotiq 2F-85 class on tool0, or no
+ * tool. [TCP_M]: flange to the fingertip midpoint, the TCP every reach, IK and collision rule uses.
+ * The design's abstract 10 / 15 / 20 cm lengths are replaced by the real gripper.
+ */
 object Gripper {
-    val STEPS_M = floatArrayOf(0f, 0.10f, 0.15f, 0.20f)
+    const val TCP_M = 0.17f
 
-    fun next(current: Float): Float {
-        val i = STEPS_M.indexOfFirst { abs(it - current) < 1e-3f }
-        return STEPS_M[(i + 1) % STEPS_M.size]
+    /** Finger stroke: fully open 85 mm, closed 0. */
+    const val STROKE_M = 0.085f
+
+    /** Collision capsule radius of the gripper body (85 mm palm, 75 mm coupling). */
+    const val BODY_R = 0.045f
+
+    val STEPS_M = floatArrayOf(TCP_M, 0f)
+
+    fun next(current: Float): Float = if (current > 0.005f) 0f else TCP_M
+
+    /** A stored tool length of an older version (10 / 15 / 20 cm) becomes the gripper. */
+    fun migrate(stored: Float): Float = if (stored > 0.005f) TCP_M else 0f
+}
+
+/** How the gripper comes at a pin: from above (tool pointing down) or from the side (tool horizontal, from the robot). */
+enum class Approach(val tag: String) {
+    TOP("top"),
+    SIDE("side");
+
+    companion object {
+        fun fromTag(tag: String?): Approach = entries.firstOrNull { it.tag == tag } ?: TOP
     }
 }
 
@@ -115,6 +137,11 @@ data class Settings(
     val units: UnitPref = UnitPref.CM,
     val showSphere: Boolean = true,
     val coachSeen: Boolean = false,
+    /** Pin approach (v0.1.2). */
+    val approach: Approach = Approach.TOP,
+    /** Taught path: MoveL between waypoints (else MoveJ), and loop playback. */
+    val linear: Boolean = false,
+    val loop: Boolean = true,
 )
 
 /** What the app remembers between launches (design `persistence`). */
@@ -131,6 +158,8 @@ data class StoredCell(
     val pins: List<Vec3>,
     /** Last known Stage position of the base (used when no anchor could be made). */
     val basePos: Vec3,
+    /** Taught waypoints, joint angles in degrees (v0.1.2). */
+    val waypoints: List<FloatArray> = emptyList(),
 )
 
 data class StoredSession(val cell: StoredCell?, val settings: Settings)

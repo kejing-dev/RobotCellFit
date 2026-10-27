@@ -30,4 +30,10 @@ object CellColors {
     val JointDark = Color(0xFF2F3439) // design-style: fixed-figma-color jointDark
     val UrBlue = Color(0xFF2D8FD6) // design-style: fixed-figma-color urBlue
     val Pole = Color(0xFFFFFFFF) // design-style: fixed-figma-color pole: pin stems
+
+    // ---- v0.1.2: the 2F-85 class gripper and the virtual room
+    val GripperBody = Color(0xFF3B4046) // design-style: fixed-figma-color gripperBody: anodised dark grey body and fingers
+    val FingerPad = Color(0xFF1B1E22) // design-style: fixed-figma-color fingerPad: rubber pads
+    val VirtualDesk = Color(0xFFB8AD97) // design-style: fixed-figma-color virtualDesk: stand-in desk top
+    val VirtualWall = Color(0xFFD8DCE0) // design-style: fixed-figma-color virtualWall: stand-in wall and floor
 }

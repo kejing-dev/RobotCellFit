@@ -125,6 +125,11 @@ private fun snackText(s: SnackUi): String =
         SnackKind.RESTORED -> rs(R.string.snack_restored)
         SnackKind.LIMIT_PINS -> rs(R.string.snack_limit_pins)
         SnackKind.DELETED -> rs(R.string.snack_deleted)
+        SnackKind.VIRTUAL_ROOM -> rs(R.string.snack_virtual_room)
+        SnackKind.REAL_DESK -> rs(R.string.snack_real_desk)
+        SnackKind.RUN_NONE -> rs(R.string.snack_run_none)
+        SnackKind.PIN_UNREACHABLE -> rs(R.string.snack_pin_unreachable)
+        SnackKind.RUN_FALLBACK -> rs(R.string.snack_run_fallback)
     }
 
 /**
@@ -172,7 +177,9 @@ internal fun SnackPanel(snack: SnackUi?, onEvent: (CellEvent) -> Unit, applied: 
                                 SnackKind.RESTORED, SnackKind.CLEARED -> R.drawable.ic_check
                                 SnackKind.DELETED -> R.drawable.ic_trash
                                 SnackKind.LIMIT_PINS -> R.drawable.ic_pin
-                                SnackKind.UNSAVED -> R.drawable.ic_warning
+                                SnackKind.UNSAVED, SnackKind.RUN_FALLBACK -> R.drawable.ic_warning
+                                SnackKind.VIRTUAL_ROOM, SnackKind.REAL_DESK -> R.drawable.ic_arm
+                                SnackKind.RUN_NONE, SnackKind.PIN_UNREACHABLE -> R.drawable.ic_pin
                                 else -> R.drawable.ic_unavailable
                             }
                         ),
@@ -309,7 +316,8 @@ internal fun EdgePlate(state: CellUiState, index: Int, shown: Boolean, applied: 
 @Composable
 internal fun PinPlate(state: CellUiState, index: Int, shown: Boolean, applied: Float, onWidth: (Float) -> Unit) {
     val (w, h) = PanelSpec.PIN_PLATE_SIZE
-    val pin = state.pins.filter { !it.reachable }.getOrNull(index)
-    val text = if (!shown || pin == null) null else rs(R.string.plate_pin_short, fmtLen(pin.shortByM, state.units))
-    Plate(w.dp, h.dp, text, PicoTheme.colorScheme.error, applied, onWidth, "plate_pin$index")
+    // the same order as the scene's plates: non-green pins, the selected one first
+    val pin = state.pins.filter { it.level != io.embodit.robotcell.domain.usecase.PinLevel.GREEN }.sortedBy { if (it.id == state.selectedPin) 0 else 1 }.getOrNull(index)
+    val text = if (!shown || pin == null) null else rs(R.string.pin_label, pin.number) + " · " + plateReason(pin, state)
+    Plate(w.dp, h.dp, text, if (pin != null) levelColor(pin.level) else PicoTheme.colorScheme.error, applied, onWidth, "plate_pin$index")
 }

@@ -47,13 +47,13 @@
     <string name="action_plus5">+5°</string>
 
     <!-- 钉 -->
-    <string name="pins_hint">点桌面插钉，点钉拔掉</string>
+    <string name="pins_hint">点桌面插钉 · 点钉看能否抓到</string>
     <string name="pins_count">%1$d 个钉 · %2$d 个够得着</string>
     <string name="pins_none">还没有钉</string>
     <string name="action_clear_pins">清除钉</string>
 
     <!-- 底部行 -->
-    <string name="gripper_none">夹爪 无</string>
+    <string name="gripper_none">无工具</string>
     <string name="gripper_len">夹爪 %1$s</string>
     <string name="hint_stick">摇杆左右转动 · 按住底座拖动</string>
     <string name="action_rot_ccw">左转 15°</string>
@@ -111,4 +111,66 @@
 
     <!-- 首次引导 -->
     <string name="coach_hint">按住底座拖动 · 点姿势看它动</string>
+    <!-- v0.1.2 -->
+    <string name="tab_run">自动</string>
+    <string name="gripper_2f">2F-85</string>
+    <string name="pin_label">钉 %1$d</string>
+    <string name="pin_none_selected">点一颗钉看能否抓到</string>
+    <string name="approach_top">从上抓</string>
+    <string name="approach_side">从侧抓</string>
+    <string name="action_go">去抓</string>
+    <string name="action_remove_pin">拔掉钉</string>
+    <string name="pin_metrics">J5 %1$s · 肘 %2$s · κ %3$s</string>
+    <string name="reason_ok">能抓到</string>
+    <string name="reason_out_of_reach">差 %1$s 够不着</string>
+    <string name="reason_out_of_reach_short">够不着</string>
+    <string name="reason_inner_void">离底座太近（内部空洞）</string>
+    <string name="reason_orientation">工具摆不出这个朝向</string>
+    <string name="reason_hits_desk">手臂会撞桌</string>
+    <string name="reason_hits_wall">手臂会撞墙</string>
+    <string name="reason_self_hit">手臂会撞到自己</string>
+    <string name="reason_wrist">靠近腕部奇异</string>
+    <string name="reason_elbow">手臂几乎伸直</string>
+    <string name="reason_shoulder">靠近肩部奇异</string>
+    <string name="reason_conditioning">雅可比条件数偏大</string>
+    <string name="reason_limit">关节接近限位</string>
+    <string name="reason_no_straight">无法直线接近</string>
+    <string name="plate_reason_wrist">腕奇异</string>
+    <string name="plate_reason_elbow">伸直</string>
+    <string name="plate_reason_shoulder">肩奇异</string>
+    <string name="plate_reason_desk">撞桌</string>
+    <string name="plate_reason_wall">撞墙</string>
+    <string name="plate_reason_self">自碰</string>
+    <string name="plate_reason_void">太近</string>
+    <string name="plate_reason_orient">朝向不行</string>
+    <string name="plate_reason_limit">限位</string>
+    <string name="plate_reason_straight">无直线路径</string>
+    <string name="plate_reason_cond">条件差</string>
+    <string name="action_run_pins">挨个抓钉</string>
+    <string name="action_play_path">播放路径</string>
+    <string name="action_stop">停止</string>
+    <string name="action_add_point">记点 %1$d</string>
+    <string name="action_grip">开合夹爪</string>
+    <string name="action_loop">循环</string>
+    <string name="action_clear_path">清空路径</string>
+    <string name="move_j">MoveJ</string>
+    <string name="move_l">MoveL</string>
+    <string name="run_hint">捏住指尖的黄球拖动 · 手臂按逆解跟随</string>
+    <string name="run_playing_pins">正在抓 %1$d 颗钉</string>
+    <string name="run_playing_path">正在播放路径</string>
+    <string name="run_playing_goto">正在去钉 %1$d</string>
+    <string name="run_idle_points">已记 %1$d 个点</string>
+    <string name="run_idle_demo">没记点：播放示范路径</string>
+    <string name="snack_virtual_room">没找到桌子 · 已在前方放一张虚拟桌</string>
+    <string name="snack_real_desk">找到桌子了 · 已撤掉虚拟桌</string>
+    <string name="snack_run_none">没有能抓到的钉</string>
+    <string name="snack_pin_unreachable">这颗钉抓不到</string>
+    <string name="snack_run_fallback">部分 MoveL 改用 MoveJ</string>
+    <string name="menu_virtual">虚拟桌</string>
+    <string name="menu_virtual_size">尺寸</string>
+    <string name="menu_virtual_height">高度</string>
+    <string name="menu_virtual_here">挪到眼前</string>
+    <string name="vsize_s">小</string>
+    <string name="vsize_m">中</string>
+    <string name="vsize_l">大</string>
 </resources>

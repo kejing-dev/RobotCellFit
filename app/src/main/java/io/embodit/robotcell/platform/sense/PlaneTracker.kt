@@ -29,6 +29,10 @@ class PlaneTracker {
 
     private val main = Handler(Looper.getMainLooper())
     private val surfaces = LinkedHashMap<String, PlaneSurface>()
+
+    /** The stand-in room's planes (factory rule D7); kept across stop / start, owned by the ViewModel. */
+    private val virtual = LinkedHashMap<String, PlaneSurface>()
+    private var merged: List<PlaneSurface> = emptyList()
     private var subscription: Cancellable? = null
     private var listener: Listener? = null
 
@@ -39,13 +43,33 @@ class PlaneTracker {
     var startedAtMs: Long = 0L
         private set
 
+    /** Scanned and virtual planes together. */
     val all: Collection<PlaneSurface>
-        get() = surfaces.values
+        get() = merged
 
     val count: Int
-        get() = surfaces.size
+        get() = merged.size
 
-    fun get(id: String): PlaneSurface? = surfaces[id]
+    /** Scanned planes only. */
+    val scanned: Collection<PlaneSurface>
+        get() = surfaces.values
+
+    fun get(id: String): PlaneSurface? = surfaces[id] ?: virtual[id]
+
+    /** Replaces the virtual planes; the listener hears about every removal and change. */
+    fun setVirtual(planes: List<PlaneSurface>) {
+        val ids = planes.map { it.id }.toSet()
+        val gone = virtual.keys.filter { it !in ids }
+        for (id in gone) virtual.remove(id)
+        for (p in planes) virtual[p.id] = p
+        rebuild()
+        for (id in gone) listener?.onPlane(id, null, false)
+        for (p in planes) listener?.onPlane(p.id, p, false)
+    }
+
+    private fun rebuild() {
+        merged = surfaces.values.toList() + virtual.values.toList()
+    }
 
     fun start(listener: Listener) {
         if (subscription != null) return
@@ -68,6 +92,7 @@ class PlaneTracker {
         runCatching { PlaneTrackingManager.stop() }
         listener = null
         surfaces.clear()
+        rebuild()
     }
 
     private fun handle(update: AnchorUpdate<PlaneAnchor>) {
@@ -82,11 +107,15 @@ class PlaneTracker {
                 val isNew = previous == null
                 if (!isNew && sameGeometry(previous!!, surface)) return
                 surfaces[id] = surface
+                rebuild()
                 if (isNew) lastAddedAtMs = SystemClock.elapsedRealtime()
                 listener?.onPlane(id, surface, isNew)
             }
             AnchorUpdate.Event.REMOVED -> {
-                if (surfaces.remove(id) != null) listener?.onPlane(id, null, false)
+                if (surfaces.remove(id) != null) {
+                    rebuild()
+                    listener?.onPlane(id, null, false)
+                }
             }
             else -> Unit
         }

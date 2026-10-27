@@ -20,13 +20,14 @@ object PanelSpec {
     /** The design's 376 dp plus one 24 dp hint line ("turn with the stick · hold the base to move"). */
     val CELL_SIZE = 400f to 400f
     val AIM_SIZE = 400f to 120f
-    val MENU_SIZE = 300f to 264f
+    /** v0.1.2: three more rows for the virtual desk (switch + move here, size, height). */
+    val MENU_SIZE = 300f to 408f
     val DIALOG_SIZE = 400f to 208f
     val SNACK_SIZE = 360f to 56f
     val COACH_SIZE = 280f to 96f
     val HIT_SIZE = 132f to 40f
     val PLATE_SIZE = 200f to 40f
-    val PIN_PLATE_SIZE = 120f to 40f
+    val PIN_PLATE_SIZE = 200f to 40f
 
     /** The cell panel family is shown at 0.75 (1 dp = 0.6 mm). */
     const val MAIN_SCALE = 0.75f

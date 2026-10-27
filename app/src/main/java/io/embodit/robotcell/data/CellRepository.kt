@@ -1,6 +1,8 @@
 package io.embodit.robotcell.data
 
 import android.content.Context
+import io.embodit.robotcell.domain.model.Approach
+import io.embodit.robotcell.domain.model.Gripper
 import io.embodit.robotcell.domain.model.LanguagePref
 import io.embodit.robotcell.domain.model.Mount
 import io.embodit.robotcell.domain.model.Settings
@@ -60,7 +62,8 @@ object CellJsonCodec {
                     .put("gripper", c.gripperM.toDouble())
                     .put("joints", JSONArray().apply { c.joints.forEach { put(it.toDouble()) } })
                     .put("pins", JSONArray().apply { c.pins.forEach { put(vec(it)) } })
-                    .put("base", vec(c.basePos)),
+                    .put("base", vec(c.basePos))
+                    .put("waypoints", JSONArray().apply { c.waypoints.forEach { w -> put(JSONArray().apply { w.forEach { put(it.toDouble()) } }) } }),
             )
         }
         root.put(
@@ -69,7 +72,10 @@ object CellJsonCodec {
                 .put("lang", s.settings.language.tag)
                 .put("units", s.settings.units.tag)
                 .put("sphere", s.settings.showSphere)
-                .put("coach", s.settings.coachSeen),
+                .put("coach", s.settings.coachSeen)
+                .put("approach", s.settings.approach.tag)
+                .put("linear", s.settings.linear)
+                .put("loop", s.settings.loop),
         )
         return root.toString()
     }
@@ -85,10 +91,11 @@ object CellJsonCodec {
                     yaw = o.optDouble("yaw", 0.0).toFloat(),
                     mount = Mount.fromTag(o.optString("mount")),
                     pedestalH = o.optDouble("pedestal", 0.0).toFloat(),
-                    gripperM = o.optDouble("gripper", 0.0).toFloat(),
+                    gripperM = Gripper.migrate(o.optDouble("gripper", 0.0).toFloat()),
                     joints = FloatArray(6) { i -> joints?.optDouble(i, 0.0)?.toFloat() ?: 0f },
                     pins = o.optJSONArray("pins")?.let { a -> List(a.length()) { vec(a.getJSONObject(it)) } } ?: emptyList(),
                     basePos = o.optJSONObject("base")?.let { vec(it) } ?: Vec3.ZERO,
+                    waypoints = o.optJSONArray("waypoints")?.let { a -> List(a.length()) { i -> a.getJSONArray(i).let { w -> FloatArray(6) { j -> w.optDouble(j, 0.0).toFloat() } } } } ?: emptyList(),
                 )
             }
         val st = root.optJSONObject("settings")
@@ -98,6 +105,9 @@ object CellJsonCodec {
                 units = UnitPref.fromTag(st?.optString("units")),
                 showSphere = st?.optBoolean("sphere", true) ?: true,
                 coachSeen = st?.optBoolean("coach", false) ?: false,
+                approach = Approach.fromTag(st?.optString("approach")),
+                linear = st?.optBoolean("linear", false) ?: false,
+                loop = st?.optBoolean("loop", true) ?: true,
             )
         return StoredSession(cell, settings)
     }

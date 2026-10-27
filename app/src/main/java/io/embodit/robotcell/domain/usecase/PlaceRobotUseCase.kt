@@ -1,5 +1,6 @@
 package io.embodit.robotcell.domain.usecase
 
+import io.embodit.robotcell.domain.model.Gripper
 import io.embodit.robotcell.domain.model.Mount
 import io.embodit.robotcell.domain.model.PlaneSurface
 import io.embodit.robotcell.domain.model.Pose
@@ -22,7 +23,7 @@ class PlaceRobotUseCase(private val reach: ReachUseCase) {
         planes: Collection<PlaneSurface>,
         head: Vec3?,
         joints: FloatArray = Pose.UPRIGHT.joints.copyOf(),
-        gripperM: Float = 0f,
+        gripperM: Float = Gripper.TCP_M,
     ): Robot? =
         when {
             plane.kind == SurfaceKind.TABLE && plane.horizontal -> {

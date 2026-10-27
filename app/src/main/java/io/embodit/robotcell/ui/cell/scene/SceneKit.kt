@@ -146,6 +146,17 @@ internal class SceneMaterials(private val shared: SharedResources) {
     val white: Material = unlit(CellColors.Pole, twoSided = true)
     val pinOk: Material = unlit(CellColors.Passable)
     val pinBad: Material = unlit(CellColors.Error)
+    val pinWarn: Material = unlit(CellColors.Alert)
+
+    /** v0.1.2: the gripper (body, fingers, pads), the TCP handle, the virtual room. */
+    val gripper: Material = unlit(CellColors.GripperBody)
+    val pad: Material = unlit(CellColors.FingerPad)
+    val handle: Material = sheer(CellColors.Interaction, 0.9f)
+    val handleBad: Material = sheer(CellColors.Error, 0.9f)
+    val vDesk: Material = sheer(CellColors.VirtualDesk, 0.6f)
+    val vDeskEdge: Material = unlit(CellColors.VirtualDesk)
+    val vWall: Material = sheer(CellColors.VirtualWall, 0.14f)
+    val vFloor: Material = sheer(CellColors.VirtualWall, 0.08f)
 
     /** Ghost landing ring: green on a desk / the floor, grey elsewhere. */
     val landOk: Material = sheer(CellColors.Passable, 0.85f, depthTest = false)

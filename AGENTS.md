@@ -13,6 +13,56 @@ holds the SDK findings this app relies on).
 Built by the factory's build station on 2026-10-25 (v0.1.0, debug). Self-tested on emulator-5564 (AVD
 Pico_Emulator_6_1_b) the same day: all 21 states captured, 30-round panel stress test passed. Not run on a headset.
 
+## v0.1.2 polish (2026-10-26, pc1): gripper, inverse kinematics, auto run, pin reachability, virtual room
+
+From the user's headset feedback on v0.1.1 ("add a gripper model, an auto run instead of clicking six joints,
+and a check whether it can reach the pins, using real robotics").
+
+- **Kinematics** (`domain/model/Ur5eKinematics.kt`, double precision, DH base frame, Z up): FK, the closed-form
+  inverse (up to 8 solutions: shoulder left / right x wrist up / down x elbow up / down; failure reasons
+  INNER_CYLINDER = wrist centre within d4 of the J1 axis, ORIENTATION, OUT_OF_REACH), the 6x6 geometric
+  Jacobian, the closed-form singularity factors (det J = a2 a3 s3 s5 (a2 c2 + a3 c23 + d5 s234): wrist sin(th5),
+  elbow sin(th3), shoulder term in metres), the condition number with angular rows scaled by 0.4 m, +-360 degree
+  limits and nearest 2 pi equivalents. Local Y-up <-> DH: (x, y, z) <-> (x, -z, y).
+- **Gripper** (`Gripper` in `CellModel.kt`, `GripperView` / `TcpHandle` in `RobotView.kt`): a 1:1 two-finger
+  gripper of the Robotiq 2F-85 class on tool0: 75 mm coupling, 85 x 62 x 90 mm body, two finger links, two pads
+  that open 0 - 85 mm; TCP = fingertip midpoint 170 mm from the flange (the old 10 / 15 / 20 cm "tool length" cycle
+  is replaced by 2F-85 / no tool; stored lengths migrate to the gripper). Reach radius 0.85 + 0.17 m. Collision
+  capsule radius 45 mm. A yellow ball at the TCP is the drag handle.
+- **Pin verdicts** (`domain/usecase/GraspUseCase.kt`): TCP target = the pin head (6 cm above the desk), approach
+  from top (tool straight down, default) or from the side (horizontal, away from the base); 12 tool rolls x 8
+  IK solutions, each checked against desks / walls (the existing capsules) and self-collision (tool and wrist 3
+  vs base column and upper arm); the best clear solution (nearest the elbow-up home branch) is graded: GREEN,
+  AMBER (wrist |th5| < 15, elbow stretched |th3| < 25, shoulder term < 5 cm, joint within 20 degrees of +-360,
+  kappa > 25, or no straight 10 cm MoveL approach), RED (out of reach + shortfall, inside the base cylinder,
+  orientation impossible, hits desk / wall / itself). On the 1.6 x 0.8 desk at 0.75 m with a top approach:
+  green to 0.875 m from the base, amber at 0.90, red from 0.925. Cached per pin by placement / pin / approach /
+  plane identity (8 pins ~5 ms). Pins are coloured green / amber / red; non-green pins carry a plate "Pin n ·
+  reason" (selected first) on the pins and run tabs; the pins tab shows the selected pin's chip, J5 / elbow / kappa.
+- **Auto run** (`domain/usecase/MotionPlanner.kt`): MoveJ (quintic, 60 deg/s peak), MoveL (TCP on a straight line
+  at 0.25 m/s, slerped orientation, IK nearest the previous sample every 20 ms; a missing solution or a jump
+  over 12 degrees turns the segment into a MoveJ and counts a fallback), Grip, Wait. Programs: Go to pin (open,
+  MoveJ pre-grasp, MoveL down, close to 20 mm), Run pins (every non-red pin, swept around the base: pre-grasp,
+  down, close, up, open; back to the start), Play path (taught waypoints MoveJ / MoveL, or a demo sweep with < 2
+  points). Loop repeats from the first waypoint. The scene plays the samples per frame (`CellScene.playFrame`)
+  and reports `MotionEnded(serial, joints, grip)`; Stop keeps the arm where it is.
+- **Jog**: pinch the yellow TCP ball and drag: the hand's travel (right / up / towards-away of the head, the base
+  drag's pixel scale) moves the target; IK nearest the shown pose every move, tool orientation kept; no solution
+  -> the arm stays, the ball turns red at the hand's point. `JogEnded(joints)` hands the pose to the ViewModel.
+- **Virtual room** (factory rule D7, `VirtualRoom.kt`, `VirtualRoomView.kt`, `PlaneTracker.setVirtual`): no
+  scanned desk 5 s after the scene is up -> a 1.2 x 0.7 desk 0.95 m ahead (top 0.75 m above the floor, or 1.45 m
+  below the eyes without a floor), a wall 0.9 m behind it and a floor if none was scanned; the planes go through
+  the tracker like scanned ones (placing, pins, verdicts, collisions all work). Drag the desk top to move it (the
+  robot and pins on it move along); More menu: on / off + "Move here", size S / M / L, height -5 / +5 cm. An
+  automatic virtual room goes when a real desk is scanned and the robot is not standing on it.
+- New states: S22 run tab, S23 a program playing, S24 dragging the TCP, S25 aiming with the virtual room.
+- Tests: `app/src/test` (23 JVM tests: FK vs the UR table, FK(IK) on 500 random poses, 8 distinct solutions,
+  det J = closed form, singular poses, pin verdicts, wall block, radial sweep, tour continuity, MoveL straightness).
+  `.\gradlew.bat testDebugUnitTest`.
+- Signing: v0.1.1 on the headset was signed by the home PC's debug key; v0.1.2 from pc1 needed an uninstall. The
+  saved cell was backed up (`../spatial-app-factory/apps/robot-cell/build/headset-backup-v0.1.1/robot_cell.xml`)
+  and restored with `run-as`; the world anchor survived. Builds from another machine will hit the same mismatch.
+
 ## Structure
 
 ```
@@ -94,8 +144,8 @@ ghost, thumbstick turning, plate placement, lazy follow) lives in `CellScene.onF
   full tilt), releasing snaps to the nearest 15 degree step within 5 degrees; the panel's two keys turn 15
   degrees per press. The cell panel carries the hint line "Turn with the stick · hold the base to move".
 - Pose tab: four tiles; joints tab: J1 - J6 segments, a slider (-180 .. 180), -5 / +5, Zero (= upright);
-  pins tab: tapping a desk drops a pin, tapping a pin removes it (only on this tab).
-- Gripper cycles none / 10 / 15 / 20 cm (reach radius, pin verdicts and the tool capsule; no gripper model).
+  pins tab: tapping a desk drops a pin; tapping a pin (any tab) selects it and shows its verdict (v0.1.2; remove is a key).
+- Gripper key toggles the 2F-85 gripper / no tool (v0.1.2; reach radius, pin verdicts, the tool capsule, the model). Run tab: see the v0.1.2 section.
 - Delete (undo via the snackbar for 6 s or the undo key, depth 20); More menu: reach sphere, language,
   units, Clear all (dialog), Exit. Tapping empty space only closes the menu.
 - Too close: head within 0.25 m of any segment -> the robot at 40 %. Lost tracking: everything grey, panel
@@ -137,7 +187,13 @@ adb -s <serial> shell "am broadcast -a io.embodit.robotcell.DEBUG -p io.embodit.
 Screenshot list for QA (design `states[].qaCapture`): S01 (spinner), S02 (compact panel dim + snackbar "look
 around"), S03 (ghost + green ring), S04 (floor-only ring, snackbar "look at the desk"), S05, S06, S07 (orange
 ring + "Past wall"), S08 (frozen half way), S09 (red segments + hit tag), S10, S11, S12, S13, S14, S15, S16,
-S17, S18, S19, S20, S21. Log tag `RobotCell`: `STATE Sxx` on every change, plus `PLANES`, `TAP`, `DRAG`,
+S17, S18, S19, S20, S21; v0.1.2: S22 (run tab), S23 (pin tour playing; capture with `PRE=0 SETTLE=0.5`), S24
+(TCP ball enlarged), S25 (virtual desk), plus `tools/qa_shot.sh - name "select 3"` for a red pin's chip. On an
+emulator room whose scanned desk is out of view, `vroom on` + `place table 0 0` puts everything in front of the
+camera (the debug hooks prefer the virtual desk while it is on). v0.1.2 debug commands: `run pins|path|stop`,
+`goto_pin [i]`, `select i`, `approach top|side`, `point`, `path_clear`, `movel on|off`, `loop`, `grip`,
+`jog dx dy dz`, `vroom on|off|here|size i|height d`; `dump` includes pin levels, reasons, kappa, grasp joints,
+motion and the virtual room. Log tag `RobotCell`: `STATE Sxx` on every change, plus `PLANES`, `TAP`, `DRAG`,
 `STICK`, `ROBOT placed|deleted|drag|turn|gripper`, `POSE`, `PIN`, `HIT`, `ANCHOR`, `RESTORE`, `SNACK`, `CMD`, `DUMP`.
 
 ## Build
@@ -194,4 +250,5 @@ drains the queue at once. Log: `MESH <name> ms=<blocked ms>`.
 ## Not built / not verified
 
 Headset-only: controller stick feel, pinch drag feel, the collision haptic (T12, not implemented), real desk
-polygons, anchor restore accuracy, permissions.
+polygons, anchor restore accuracy, permissions. v0.1.2: the TCP drag's hand-to-metre scale and the depth axis
+(`dragAmount.z`) are unverified on a headset (the emulator mouse has no depth); the virtual desk drag likewise.

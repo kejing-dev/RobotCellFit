@@ -34,7 +34,7 @@ object Ur5e {
     private val ALPHA = floatArrayOf((Math.PI / 2).toFloat(), 0f, 0f, (Math.PI / 2).toFloat(), (-Math.PI / 2).toFloat(), 0f)
 
     /** Capsule radii per segment: base, shoulder (upper arm), forearm, wrist1, wrist2, wrist3, gripper (design `entities3d.linkHit`). */
-    val CAPSULE_R = floatArrayOf(0.075f, 0.06f, 0.055f, 0.045f, 0.045f, 0.045f, 0.04f)
+    val CAPSULE_R = floatArrayOf(0.075f, 0.06f, 0.055f, 0.045f, 0.045f, 0.045f, Gripper.BODY_R)
 
     /** Mesh radii of the white model's link cylinders (a little under the capsules). */
     val LINK_R = floatArrayOf(0.0745f, 0.056f, 0.048f, 0.038f, 0.038f, 0.036f)

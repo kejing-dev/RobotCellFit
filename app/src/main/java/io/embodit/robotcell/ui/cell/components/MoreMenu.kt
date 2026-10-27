@@ -23,8 +23,9 @@ import io.embodit.robotcell.ui.cell.debug.probe
 import io.embodit.robotcell.ui.cell.scene.PanelSpec
 
 /**
- * The More menu (300 x 264 dp at 0.75, S13): reach sphere switch, language and unit segments,
- * "Clear all" and Exit; rows 44 high. Segments act in place and leave the menu open.
+ * The More menu (300 x 408 dp at 0.75, S13): reach sphere switch, language and unit segments, the virtual
+ * desk (factory rule D7: on / off + move here, size S / M / L = 80x60 / 120x70 / 160x80 cm, height -5 / +5 cm), "Clear all" and Exit;
+ * rows 44 high. Segments act in place and leave the menu open.
  */
 @Composable
 internal fun MoreMenu(state: CellUiState, filled: Boolean, onEvent: (CellEvent) -> Unit) {
@@ -57,6 +58,26 @@ internal fun MoreMenu(state: CellUiState, filled: Boolean, onEvent: (CellEvent) 
                 itemWidth = 64.dp,
                 height = 40.dp,
             )
+        }
+        val vr = state.virtualRoom
+        MenuRow(rs(R.string.menu_virtual)) {
+            Switch(checked = vr != null, onCheckedChange = { onEvent(CellEvent.VirtualToggled(it)) }, modifier = Modifier.probe("menu_virtual") { onEvent(CellEvent.VirtualToggled(vr == null)) })
+            Spacer(modifier = Modifier.weight(1f))
+            WordButton("menu_virtual_here", rs(R.string.menu_virtual_here), { onEvent(CellEvent.VirtualHereClicked) }, enabled = vr != null, minWidth = 96.dp, height = 40.dp)
+        }
+        MenuRow(rs(R.string.menu_virtual_size)) {
+            Segments(
+                items = listOf("vsize_s" to rs(R.string.vsize_s), "vsize_m" to rs(R.string.vsize_m), "vsize_l" to rs(R.string.vsize_l)),
+                selected = state.virtualSize,
+                onSelect = { onEvent(CellEvent.VirtualSizeSelected(it)) },
+                itemWidth = 56.dp,
+                height = 40.dp,
+            )
+        }
+        MenuRow(rs(R.string.menu_virtual_height)) {
+            Key("vheight_minus", R.drawable.ic_minus, rs(R.string.action_minus5), enabled = vr != null) { onEvent(CellEvent.VirtualHeightStepped(-0.05f)) }
+            Text(text = vr?.let { fmtLen(it.height, state.units) } ?: "—", color = PicoTheme.colorScheme.labelPrimary, style = CellType.title, maxLines = 1, modifier = Modifier.width(64.dp))
+            Key("vheight_plus", R.drawable.ic_plus, rs(R.string.action_plus5), enabled = vr != null) { onEvent(CellEvent.VirtualHeightStepped(0.05f)) }
         }
         Row(modifier = Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
             WordButton("menu_clear", rs(R.string.menu_clear), { onEvent(CellEvent.ClearAllClicked) }, enabled = state.robot != null || state.pins.isNotEmpty(), minWidth = 160.dp, height = 40.dp, iconRes = R.drawable.ic_trash)

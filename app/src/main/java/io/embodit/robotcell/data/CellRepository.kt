@@ -73,6 +73,7 @@ object CellJsonCodec {
                 .put("units", s.settings.units.tag)
                 .put("sphere", s.settings.showSphere)
                 .put("coach", s.settings.coachSeen)
+                .put("sound", s.settings.sound)
                 .put("approach", s.settings.approach.tag)
                 .put("linear", s.settings.linear)
                 .put("loop", s.settings.loop),
@@ -105,6 +106,7 @@ object CellJsonCodec {
                 units = UnitPref.fromTag(st?.optString("units")),
                 showSphere = st?.optBoolean("sphere", true) ?: true,
                 coachSeen = st?.optBoolean("coach", false) ?: false,
+                sound = st?.optBoolean("sound", true) ?: true,
                 approach = Approach.fromTag(st?.optString("approach")),
                 linear = st?.optBoolean("linear", false) ?: false,
                 loop = st?.optBoolean("loop", true) ?: true,

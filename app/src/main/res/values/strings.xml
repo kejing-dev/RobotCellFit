@@ -173,4 +173,6 @@
     <string name="vsize_s">S</string>
     <string name="vsize_m">M</string>
     <string name="vsize_l">L</string>
+    <string name="action_mute">Mute sounds</string>
+    <string name="action_unmute">Turn sounds on</string>
 </resources>

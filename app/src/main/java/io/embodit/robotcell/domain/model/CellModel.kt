@@ -137,6 +137,8 @@ data class Settings(
     val units: UnitPref = UnitPref.CM,
     val showSphere: Boolean = true,
     val coachSeen: Boolean = false,
+    /** Sound effects on (factory rule D15: a mute key on the main panel, remembered). */
+    val sound: Boolean = true,
     /** Pin approach (v0.1.2). */
     val approach: Approach = Approach.TOP,
     /** Taught path: MoveL between waypoints (else MoveJ), and loop playback. */

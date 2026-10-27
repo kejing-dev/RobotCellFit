@@ -142,6 +142,8 @@ data class CellUiState(
     val language: LanguagePref = LanguagePref.SYSTEM,
     val units: UnitPref = UnitPref.CM,
     val showSphere: Boolean = true,
+    /** Sound on (the mute key on the main panel, D15). */
+    val sound: Boolean = true,
     val dragging: Boolean = false,
     val canUndo: Boolean = false,
     val hasTable: Boolean = false,
@@ -273,6 +275,8 @@ sealed interface CellEvent {
     data class UnitsSelected(val units: UnitPref) : CellEvent
 
     data class SphereToggled(val on: Boolean) : CellEvent
+
+    data object SoundToggled : CellEvent
 
     // ---- v0.1.2: pins, auto run, jog, virtual room
     data object ApproachToggled : CellEvent

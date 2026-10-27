@@ -76,16 +76,22 @@ data class VirtualRoom(
 
         /** The desk centre is this far ahead of the head. */
         const val AHEAD_M = 0.95f
+        const val MIN_AHEAD_M = 0.6f
+
+        /** Room left between the desk's far edge and a scanned wall ahead. */
+        const val WALL_CLEAR_M = 0.25f
 
         private val QUAD = listOf(0, 1, 2, 0, 2, 3)
 
         fun isVirtual(id: String?): Boolean = id != null && id.startsWith("virtual-")
 
         /** A room in front of the head: desk centre [AHEAD_M] ahead, floor at [floorY] or eye height below the head. */
-        fun inFront(head: Vec3, headForward: Vec3, floorY: Float?, size: Int = DEFAULT_SIZE, height: Float = DEFAULT_HEIGHT_M): VirtualRoom {
+        fun inFront(head: Vec3, headForward: Vec3, floorY: Float?, size: Int = DEFAULT_SIZE, height: Float = DEFAULT_HEIGHT_M, wallAheadM: Float? = null): VirtualRoom {
             val f = Vec3(headForward.x, 0f, headForward.z).let { if (it.length < 0.1f) Vec3.AHEAD else it.normalized() }
             val (w, d) = SIZES[size.coerceIn(0, SIZES.size - 1)]
-            val c = head + f * AHEAD_M
+            // a scanned wall ahead: the desk's far edge stays WALL_CLEAR_M short of it (never nearer than MIN_AHEAD_M)
+            val ahead = if (wallAheadM == null) AHEAD_M else (wallAheadM - d / 2f - WALL_CLEAR_M).coerceIn(MIN_AHEAD_M, AHEAD_M)
+            val c = head + f * ahead
             return VirtualRoom(Vec3(c.x, 0f, c.z), f, w, d, height, floorY ?: (head.y - EYE_HEIGHT_M), withFloor = floorY == null)
         }
     }

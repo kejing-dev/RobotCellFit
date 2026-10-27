@@ -61,6 +61,9 @@ object CellProbe {
         fun parkPanel(): String
 
         fun setFpsLine(on: Boolean): String
+
+        /** Forces the snackbar's line-of-sight pull factor (null: automatic). */
+        fun forceSnackPull(factor: Float?): String
     }
 
     @Volatile var host: Host? = null

@@ -27,7 +27,9 @@ import io.embodit.robotcell.domain.model.SurfaceKind
 import io.embodit.robotcell.domain.model.Ur5e
 import io.embodit.robotcell.domain.model.Vec3
 import io.embodit.robotcell.domain.usecase.GraspUseCase
+import io.embodit.robotcell.domain.usecase.Capsule
 import io.embodit.robotcell.domain.usecase.HitSurfaceUseCase
+import io.embodit.robotcell.domain.usecase.LineOfSight
 import io.embodit.robotcell.domain.usecase.LinkHit
 import io.embodit.robotcell.domain.usecase.PlaceRobotUseCase
 import io.embodit.robotcell.domain.usecase.ReachUseCase
@@ -131,6 +133,9 @@ class CellScene(private val sink: (CellEvent) -> Unit) : CellProbe.SceneProbe {
     private var panelPressed = false
     private var lastPanelPressMs = NEVER
     private var dialogPlaced = false
+    private var dialogBase = Vec3.ZERO
+    /** The arm's capsules of this frame (Stage metres), for the line-of-sight rule of the panels. */
+    private var armCapsules: List<Capsule> = emptyList()
 
     // the shown pose: eased towards the state's joints
     private var shownJoints: FloatArray = floatArrayOf(0f, -90f, 0f, -90f, 0f, 0f)
@@ -143,9 +148,11 @@ class CellScene(private val sink: (CellEvent) -> Unit) : CellProbe.SceneProbe {
     private var lastHits: List<LinkHit> = emptyList()
     private var frames: Array<Ur5e.Frame> = Ur5e.frames(shownJoints)
 
-    // dragging the base with the system pointer
+    // dragging the base: along the controller ray when there is one (factory rule D1), else the hand's travel
     private var dragging = false
     private var dragPxToM = 0.001f
+    private var rayDrag = false
+    private var rayGrab = Vec3.ZERO
 
     // thumbstick
     private var stickActive = false
@@ -539,7 +546,8 @@ class CellScene(private val sink: (CellEvent) -> Unit) : CellProbe.SceneProbe {
         if (state.dialog != null) {
             if (!dialogPlaced) {
                 val flat = Vec3(head.forward.x, 0f, head.forward.z).let { if (it.length < 0.1f) Vec3.AHEAD else it.normalized() }
-                dialog?.show(head.position + flat * PanelSpec.DIALOG_DISTANCE_M, PanelSpec.FLOATING_SCALE)
+                dialogBase = head.position + flat * PanelSpec.DIALOG_DISTANCE_M
+                dialog?.show(dialogBase, PanelSpec.FLOATING_SCALE)
                 dialogPlaced = true
             }
         } else {
@@ -590,6 +598,7 @@ class CellScene(private val sink: (CellEvent) -> Unit) : CellProbe.SceneProbe {
         ghostFrame(state)
         stickFrame(state, now)
         placeMarks(state, rig)
+        sightFloating(state, rig)
         if (hasHead && now - lastHeadSentMs >= HEAD_SAMPLE_MS) {
             lastHeadSentMs = now
             sink(CellEvent.HeadSample(head.position, head.forward))
@@ -605,11 +614,59 @@ class CellScene(private val sink: (CellEvent) -> Unit) : CellProbe.SceneProbe {
         val rot = follower.rotation
         val k = PanelSpec.MAIN_SCALE
         val shownId = if (state.compact) PanelSpec.AIM else PanelSpec.CELL
-        rig[shownId]?.place(pose.position, rot, k)
         val (hw, hh) = PanelSpec.halfM(shownId, k)
-        if (state.menuOpen) {
-            val (mw, mh) = PanelSpec.halfM(PanelSpec.MENU, k)
-            rig[PanelSpec.MENU]?.place(pose.position + rot.rotate(Vec3(hw - mw, hh + 0.012f + mh, 0.012f)), rot, k)
+        val menuPos =
+            if (state.menuOpen) {
+                val (mw, mh) = PanelSpec.halfM(PanelSpec.MENU, k)
+                pose.position + rot.rotate(Vec3(hw - mw, hh + 0.012f + mh, 0.012f))
+            } else null
+        // line of sight: the whole family comes in front of the arm, keeping its angular size
+        val eye = head.position
+        var f = LineOfSight.pullFactor(eye, pose.position, radiusOf(shownId, k), armCapsules)
+        if (menuPos != null) f = minOf(f, LineOfSight.pullFactor(eye, menuPos, radiusOf(PanelSpec.MENU, k), armCapsules))
+        fun pulled(p: Vec3) = if (f >= 1f) p else eye + (p - eye) * f
+        if (f < 1f && f != lastFamilyPull) CellLog.i("SIGHT family pulled f=${CellLog.f(f)}")
+        lastFamilyPull = f
+        rig[shownId]?.place(pulled(pose.position), rot, k * f)
+        if (menuPos != null) rig[PanelSpec.MENU]?.place(pulled(menuPos), rot, k * f)
+    }
+
+    private var lastFamilyPull = 1f
+    private var wasNear = false
+    private var lastSnackPull = 1f
+    private var forcedSnackPull: Float? = null
+
+    /** Radius of a panel at scale [k] for the line-of-sight rule: half its diagonal. */
+    private fun radiusOf(id: String, k: Float): Float {
+        val (hw, hh) = PanelSpec.halfM(id, k)
+        return kotlin.math.sqrt(hw * hw + hh * hh)
+    }
+
+    /** The arm as capsules in Stage space (base column, five links, the gripper). */
+    private fun updateArmCapsules(r: Robot) {
+        val rot = r.rotation
+        val m = r.mountPoint
+        fun w(p: Vec3) = m + rot.rotate(p)
+        val out = ArrayList<Capsule>(7)
+        out += Capsule(r.base, w(frames[1].origin), Ur5e.CAPSULE_R[0])
+        for (i in 1 until 6) out += Capsule(w(frames[i].origin), w(frames[i + 1].origin), Ur5e.CAPSULE_R[i])
+        if (r.gripperM > 0.005f) out += Capsule(w(frames[6].origin), w(Ur5e.tip(frames, r.gripperM)), Ur5e.CAPSULE_R[6])
+        armCapsules = out
+    }
+
+    /** The dialog (world, placed at open) and the head-locked snackbar come in front of the arm too. */
+    private fun sightFloating(state: CellUiState, rig: PanelRig) {
+        val eye = head.position
+        if (state.dialog != null && dialogPlaced) {
+            val f = LineOfSight.pullFactor(eye, dialogBase, radiusOf(PanelSpec.DIALOG, PanelSpec.FLOATING_SCALE), armCapsules)
+            rig[PanelSpec.DIALOG]?.show(if (f >= 1f) dialogBase else eye + (dialogBase - eye) * f, PanelSpec.FLOATING_SCALE * f)
+        }
+        val snack = rig[PanelSpec.SNACK] ?: return
+        val f = forcedSnackPull ?: if (state.snack == null) 1f else LineOfSight.pullFactor(eye, eye + head.rotation.rotate(SNACK_HEAD_OFFSET), radiusOf(PanelSpec.SNACK, PanelSpec.FLOATING_SCALE), armCapsules)
+        if (f != lastSnackPull) {
+            lastSnackPull = f
+            if (f < 1f) CellLog.i("SIGHT snack pulled f=${CellLog.f(f)}")
+            snack.setHeadPull(f)
         }
     }
 
@@ -617,7 +674,10 @@ class CellScene(private val sink: (CellEvent) -> Unit) : CellProbe.SceneProbe {
     private fun poseFrame(state: CellUiState, now: Long) {
         val robotView = robot ?: return
         val r = state.robot?.robot
-        if (r == null) return
+        if (r == null) {
+            armCapsules = emptyList()
+            return
+        }
         playFrame(now)
         if (abs(shownGrip - gripTarget) > 1e-4f) {
             shownGrip += (gripTarget - shownGrip) * GRIP_EASE
@@ -656,6 +716,7 @@ class CellScene(private val sink: (CellEvent) -> Unit) : CellProbe.SceneProbe {
                 sink(CellEvent.HitsChanged(found))
             }
         }
+        updateArmCapsules(r)
         // the TCP handle rides on the fingertips (on the hand's point while a drag has no solution)
         tcpHandle?.let { h ->
             val show = state.placed && !state.trackingLost && playing == null
@@ -666,10 +727,15 @@ class CellScene(private val sink: (CellEvent) -> Unit) : CellProbe.SceneProbe {
                 h.setState(reachable = !jogActive || jogOk, active = jogActive || state.jogging)
             }
         }
-        // too close: the whole robot at 40 % while the head is within 0.25 m of any segment
+        // too close (factory rule D14): the whole robot at 25 % while the head is within 0.5 m of the arm or the gripper
         if (hasHead) {
-            val near = reach.distanceToArm(r, frames, head.position) < NEAR_M
+            val gap = reach.distanceToArm(r, frames, head.position)
+            val near = gap < NEAR_M
             robotView.setOpacity(if (near) NEAR_OPACITY else 1f)
+            if (near != wasNear) {
+                wasNear = near
+                CellLog.i("NEAR ${if (near) "on" else "off"} gap=${CellLog.f(gap)} opacity=${if (near) NEAR_OPACITY else 1f}")
+            }
         }
     }
 
@@ -754,12 +820,12 @@ class CellScene(private val sink: (CellEvent) -> Unit) : CellProbe.SceneProbe {
             when (state.verdict.wall) {
                 WallState.NEAR -> {
                     tape?.draw(wall.spherePoint, wall.wallPoint, head.position - wall.spherePoint.lerp(wall.wallPoint, 0.5f))
-                    rig[PanelSpec.PLATE_WALL]?.show(wall.spherePoint.lerp(wall.wallPoint, 0.5f) + Vec3(0f, PLATE_LIFT_M, 0f), plateK)
+                    sightShow(rig[PanelSpec.PLATE_WALL], PanelSpec.PLATE_WALL, wall.spherePoint.lerp(wall.wallPoint, 0.5f) + Vec3(0f, PLATE_LIFT_M, 0f), plateK)
                 }
                 WallState.IN -> {
                     tape?.hide()
                     val toward = (r.shoulder - wall.wallPoint).normalized()
-                    rig[PanelSpec.PLATE_WALL]?.show(wall.wallPoint + toward * 0.02f + Vec3(0f, PLATE_LIFT_M + 0.02f, 0f), plateK)
+                    sightShow(rig[PanelSpec.PLATE_WALL], PanelSpec.PLATE_WALL, wall.wallPoint + toward * 0.02f + Vec3(0f, PLATE_LIFT_M + 0.02f, 0f), plateK)
                 }
                 else -> {
                     tape?.hide()
@@ -781,31 +847,34 @@ class CellScene(private val sink: (CellEvent) -> Unit) : CellProbe.SceneProbe {
             } else {
                 val from = Vec3(r.base.x, e.first.y, r.base.z)
                 t.draw(from, e.first, Vec3.UP)
-                rig[edgeIds[i]]?.show(from.lerp(e.first, 0.5f) + Vec3(0f, PLATE_LIFT_M, 0f), plateK)
+                sightShow(rig[edgeIds[i]], edgeIds[i], from.lerp(e.first, 0.5f) + Vec3(0f, PLATE_LIFT_M, 0f), plateK)
             }
         }
         // pins out of reach: a plate above each (pins tab only, nearest four)
         val pinPlates = PanelSpec.pinPlates
         val shortPins =
-            if ((state.tab == Tab.PINS || state.tab == Tab.RUN) && state.mode == Mode.PLACED) {
+            if ((state.tab == Tab.PINS || state.tab == Tab.RUN) && state.mode == Mode.PLACED && !state.running) {
                 state.pins.withIndex().filter { it.value.level != io.embodit.robotcell.domain.usecase.PinLevel.GREEN }.sortedBy { if (it.value.id == state.selectedPin) 0 else 1 }.take(pinPlates.size)
             } else emptyList()
+        // plates of pins close together are stacked so that they never overlap
+        val anchors = shortPins.map { it.value.position + Vec3(0f, PinViews.STEM_H + 0.05f, 0f) }
+        val lifts = LineOfSight.stack(anchors, PLATE_GAP_M * plateK, PLATE_H_M * plateK)
         for ((k, id) in pinPlates.withIndex()) {
-            val p = shortPins.getOrNull(k)
-            if (p == null) {
+            val a = anchors.getOrNull(k)
+            if (a == null) {
                 rig[id]?.hide()
             } else {
-                rig[id]?.show(p.value.position + Vec3(0f, PinViews.STEM_H + 0.05f, 0f), plateK)
+                sightShow(rig[id], id, a + Vec3(0f, lifts[k], 0f), plateK)
             }
         }
         // the hit tag 6 cm above the first contact
         val hp = state.hitPoint
-        if (hp != null && state.collides && !state.trackingLost) rig[PanelSpec.HIT]?.show(hp + Vec3(0f, 0.06f, 0f), plateK) else rig[PanelSpec.HIT]?.hide()
+        if (hp != null && state.collides && !state.trackingLost) sightShow(rig[PanelSpec.HIT], PanelSpec.HIT, hp + Vec3(0f, 0.06f, 0f), plateK) else rig[PanelSpec.HIT]?.hide()
         // coachmark 30 cm above the base, pulled 30 cm towards the viewer so that the upright arm does not hide it
         if (state.coach && r != null) {
             val (_, ch) = PanelSpec.halfM(PanelSpec.COACH, PanelSpec.MAIN_SCALE)
             val toward = Vec3(head.position.x - r.base.x, 0f, head.position.z - r.base.z).let { if (it.length < 0.1f) Vec3.AHEAD else it.normalized() }
-            rig[PanelSpec.COACH]?.show(r.mountPoint + toward * 0.30f + Vec3(0f, 0.30f + ch, 0f), PanelSpec.MAIN_SCALE)
+            sightShow(rig[PanelSpec.COACH], PanelSpec.COACH, r.mountPoint + toward * 0.30f + Vec3(0f, 0.30f + ch, 0f), PanelSpec.MAIN_SCALE, panel = true)
         }
     }
 
@@ -838,6 +907,8 @@ class CellScene(private val sink: (CellEvent) -> Unit) : CellProbe.SceneProbe {
         val lost = headTracker.lost(now)
         if (lost == lastLost) return
         lastLost = lost
+        // tracking back (a recentre, a headset taken off and on): the panel comes back in front of the head
+        if (!lost && hasHead) follower.park(head, planeTracker.all, now)
         sink(CellEvent.TrackingChanged(lost))
     }
 
@@ -922,6 +993,10 @@ class CellScene(private val sink: (CellEvent) -> Unit) : CellProbe.SceneProbe {
                 if (robot?.isGrab(target) != true) return
                 val dist = head.position.distanceTo(r.mountPoint).coerceAtLeast(0.3f)
                 dragPxToM = PX_M * (0.67f + 1.186f * dist)
+                // with a controller the base follows the ray's point on its own surface, keeping where it was grabbed
+                val hit = controller.sample()?.ray?.let { rayOnLevel(it, r.base.y) }
+                rayDrag = hit != null
+                if (hit != null) rayGrab = Vec3(hit.x - r.base.x, 0f, hit.z - r.base.z)
                 dragging = true
                 CellLog.i("DRAG start dist=${CellLog.f(dist)}")
                 sink(CellEvent.DragStarted)
@@ -939,6 +1014,12 @@ class CellScene(private val sink: (CellEvent) -> Unit) : CellProbe.SceneProbe {
                     return
                 }
                 if (!dragging) return
+                if (rayDrag) {
+                    val r = ui.robot?.robot ?: return
+                    val hit = controller.sample()?.ray?.let { rayOnLevel(it, r.base.y) } ?: return
+                    sink(CellEvent.DragMoved(Vec3(hit.x - rayGrab.x - r.base.x, 0f, hit.z - rayGrab.z - r.base.z)))
+                    return
+                }
                 val amount = value.dragAmount
                 val right = Vec3(head.right.x, 0f, head.right.z).let { if (it.length < 0.1f) Vec3.RIGHT else it.normalized() }
                 val fwd = Vec3(head.forward.x, 0f, head.forward.z).let { if (it.length < 0.1f) Vec3.AHEAD else it.normalized() }
@@ -961,7 +1042,8 @@ class CellScene(private val sink: (CellEvent) -> Unit) : CellProbe.SceneProbe {
                 }
                 if (!dragging) return
                 dragging = false
-                CellLog.i("DRAG end")
+                CellLog.i("DRAG end ray=$rayDrag")
+                rayDrag = false
                 sink(CellEvent.DragEnded)
             }
         }
@@ -991,6 +1073,15 @@ class CellScene(private val sink: (CellEvent) -> Unit) : CellProbe.SceneProbe {
             shownJoints = sol
             poseDirty = true
         }
+    }
+
+    /** Where a ray meets the horizontal plane at height [y] (within 8 m, ahead), or null. */
+    private fun rayOnLevel(ray: PointerRay, y: Float): Vec3? {
+        val dy = ray.direction.y
+        if (kotlin.math.abs(dy) < 1e-3f) return null
+        val t = (y - ray.origin.y) / dy
+        if (t <= 0f || t > 8f) return null
+        return ray.origin + ray.direction * t
     }
 
     /** View-local pixels of a spatial tap -> Stage metres, through the SpatialView content conversion. */
@@ -1032,6 +1123,24 @@ class CellScene(private val sink: (CellEvent) -> Unit) : CellProbe.SceneProbe {
         return "FOLLOW cell park requested"
     }
 
+    override fun forceSnackPull(factor: Float?): String {
+        forcedSnackPull = factor
+        return "SIGHT snack forced=${factor ?: "auto"}"
+    }
+
+    /** Shows a world plate (tags, plates, coachmark) at [at], brought in front of the arm when the arm is in the way. */
+    private fun sightShow(slot: PanelRig.Slot?, id: String, at: Vec3, k: Float, panel: Boolean = false) {
+        val s = slot ?: return
+        val f = LineOfSight.pullFactor(head.position, at, radiusOf(id, k), armCapsules, minDistM = PLATE_MIN_DIST_M)
+        if (f >= 1f) {
+            s.show(at, k)
+            return
+        }
+        val pulled = head.position + (at - head.position) * f
+        // a panel keeps its angular size; a plate takes the plate scale of its new distance (readable, never tiny)
+        s.show(pulled, if (panel) k * f else plateScale(pulled))
+    }
+
     override fun setFpsLine(on: Boolean): String {
         fpsOn = on
         framesCount = 0
@@ -1046,12 +1155,19 @@ class CellScene(private val sink: (CellEvent) -> Unit) : CellProbe.SceneProbe {
         private const val HEAD_SAMPLE_MS = 100L
         private const val PANEL_HOLD_MS = 600L
         private const val ANIM_MS = 800f
-        private const val NEAR_M = 0.25f
-        private const val NEAR_OPACITY = 0.4f
+        private const val NEAR_M = 0.5f
+        private const val NEAR_OPACITY = 0.25f
         private const val STICK_DEAD = 0.15f
         private const val STICK_RATE_RAD_S = 1.0472f
         private const val PLATE_LIFT_M = 0.04f
         private const val GRIP_EASE = 0.18f
+
+        /** A pin plate (200 x 40 dp at 1.0) is 0.16 x 0.032 m: plates nearer than this are stacked. */
+        private const val PLATE_GAP_M = 0.17f
+        private const val PLATE_H_M = 0.038f
+
+        /** Plates pulled in front of the arm stop this near the eyes. */
+        private const val PLATE_MIN_DIST_M = 0.25f
         private const val JOG_MAX_JUMP_DEG = 30f
         private const val MESH_PER_FRAME = 2
         private const val FAST_FRAME_MS = 40L

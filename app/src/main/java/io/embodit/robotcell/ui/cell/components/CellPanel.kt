@@ -76,6 +76,7 @@ internal fun AimPanel(state: CellUiState, filled: Boolean, onEvent: (CellEvent) 
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
+            SoundKey(state, onEvent)
             Key("more", R.drawable.ic_more, rs(R.string.action_more), enabled = state.mode != Mode.STARTING) { onEvent(CellEvent.MoreClicked) }
         }
         Text(
@@ -154,12 +155,19 @@ internal fun CellPanel(state: CellUiState, filled: Boolean, onEvent: (CellEvent)
                 if (g < 0.005f) rs(R.string.gripper_none) else rs(R.string.gripper_len, rs(R.string.gripper_2f)),
                 { onEvent(CellEvent.GripperCycled) },
                 enabled = !disabled,
-                minWidth = 128.dp,
+                minWidth = 112.dp,
             )
             Spacer(modifier = Modifier.weight(1f))
+            SoundKey(state, onEvent)
             Key("delete", R.drawable.ic_trash, rs(R.string.action_delete), enabled = !disabled) { onEvent(CellEvent.DeleteClicked) }
         }
     }
+}
+
+/** The mute key (factory rule D15): on the main panel, one press, remembered. */
+@Composable
+private fun SoundKey(state: CellUiState, onEvent: (CellEvent) -> Unit) {
+    Key("sound", if (state.sound) R.drawable.ic_sound else R.drawable.ic_sound_off, if (state.sound) rs(R.string.action_mute) else rs(R.string.action_unmute)) { onEvent(CellEvent.SoundToggled) }
 }
 
 /** The three verdict chips: desk share, wall, pins (design `layouts.verdictChips`). */

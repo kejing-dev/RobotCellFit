@@ -56,6 +56,18 @@ and a check whether it can reach the pins, using real robotics").
   robot and pins on it move along); More menu: on / off + "Move here", size S / M / L, height -5 / +5 cm. An
   automatic virtual room goes when a real desk is scanned and the robot is not standing on it.
 - New states: S22 run tab, S23 a program playing, S24 dragging the TCP, S25 aiming with the virtual room.
+- **UI clearance audit** (parent request, `../spatial-app-factory/apps/robot-cell/build/ui-audit.md`, `tools/ui_audit.sh`):
+  `domain/usecase/LineOfSight.kt` brings any panel in front of the arm when an arm capsule is between the eyes and
+  the panel (same angular size; min 0.32 m, plates 0.25 m): the cell / aim panel + menu family, the dialog, the
+  head-locked snackbar (moved inside its camera anchor: replacing the AnchorComponent detaches it), plates, hit tag,
+  coachmark. Pin plates are hidden while a program plays and stacked when pins are close. Tracking regained ->
+  the panel re-parks in front of the head. The virtual desk stops 0.25 m short of a scanned wall straight ahead.
+- **Factory rules D14 / D15 / D1** (from `../spatial-app-factory/apps/_audit/sound-and-clearance.md`): placing and
+  dragging keep the base >= 0.8 m from the head horizontally (`PlaceRobotUseCase.clearOfHead`, desk: farthest legal
+  point when the desk is too near); the robot goes to 25 % when the head is within 0.5 m of the arm (log `NEAR`);
+  a mute key on the cell and aim panels (remembered, `Settings.sound`); the collision sound at most every 2 s;
+  dragging the base follows the controller ray's point on the mount level when a controller is tracked (the hand's
+  travel otherwise; log `DRAG end ray=true|false`).
 - Tests: `app/src/test` (23 JVM tests: FK vs the UR table, FK(IK) on 500 random poses, 8 distinct solutions,
   det J = closed form, singular poses, pin verdicts, wall block, radial sweep, tour continuity, MoveL straightness).
   `.\gradlew.bat testDebugUnitTest`.

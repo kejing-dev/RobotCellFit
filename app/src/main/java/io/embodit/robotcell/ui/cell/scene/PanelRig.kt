@@ -71,6 +71,9 @@ internal class PanelRig(private val stageRoot: Entity, private val onVisibility:
             }
 
         var headOffset: Vec3? = null
+        /** HEAD slots: the designed scale; [setHeadPull] brings the panel nearer at the same angular size. */
+        var headBaseScale = 1f
+        private var headPull = 1f
         var headRotation: Quat4 = Quat4.IDENTITY
         var switch: Entity = holder
         var facing: PanelFacing = PanelFacing(0f, 0f)
@@ -149,6 +152,19 @@ internal class PanelRig(private val stageRoot: Entity, private val onVisibility:
             this.rotation = rotation
             holder.setLocal(rotation = rotation)
             shown = true
+            apply()
+        }
+
+        /** HEAD slots: puts the panel at [factor] of its designed distance, scaled by the same factor (in front of the arm). */
+        fun setHeadPull(factor: Float) {
+            val off = headOffset ?: return
+            val f = (Math.round(factor * 20f) / 20f).coerceIn(0.2f, 1f)
+            if (f == headPull) return
+            headPull = f
+            // the camera anchor stays as made (replacing its AnchorComponent detaches it); the panel moves inside it,
+            // back along the offset in the anchor's camera-aligned frame
+            position = off * (f - 1f)
+            scale = headBaseScale * f
             apply()
         }
 
@@ -264,6 +280,7 @@ internal class PanelRig(private val stageRoot: Entity, private val onVisibility:
         scaler.setLocal(rotation = rotation)
         return Slot(id, scaler, Mount.HEAD, widthDp, heightDp).also {
             it.headOffset = offset
+            it.headBaseScale = scale
             it.headRotation = rotation
             it.switch = anchor
             it.home(Vec3.ZERO, scale, visible = false)

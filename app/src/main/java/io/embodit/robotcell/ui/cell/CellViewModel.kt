@@ -242,7 +242,7 @@ class CellViewModel(private val appContext: Context) : ViewModel() {
             is CellEvent.DragMoved -> {
                 val r = robot ?: return
                 if (!dragging) return
-                val moved = placeRule.constrain(r.copy(base = r.base + Vec3(event.delta.x, 0f, event.delta.z)), planes())
+                val moved = placeRule.constrain(r.copy(base = r.base + Vec3(event.delta.x, 0f, event.delta.z)), planes(), head)
                 robot = moved
                 recompute()
                 publish()
@@ -478,6 +478,12 @@ class CellViewModel(private val appContext: Context) : ViewModel() {
             }
             is CellEvent.UnitsSelected -> {
                 settings = settings.copy(units = event.units)
+                scheduleSave()
+                publish()
+            }
+            CellEvent.SoundToggled -> {
+                settings = settings.copy(sound = !settings.sound)
+                CellLog.i("SOUND ${if (settings.sound) "on" else "muted"}")
                 scheduleSave()
                 publish()
             }
@@ -973,8 +979,29 @@ class CellViewModel(private val appContext: Context) : ViewModel() {
             }
     }
 
-    private fun makeRoom(): VirtualRoom =
-        VirtualRoom.inFront(head ?: Vec3.ZERO, headForward, reach.floorY(planeTracker.scanned), virtualSize, virtualRoom?.height ?: VirtualRoom.DEFAULT_HEIGHT_M)
+    private fun makeRoom(): VirtualRoom {
+        val h = head ?: Vec3.ZERO
+        return VirtualRoom.inFront(h, headForward, reach.floorY(planeTracker.scanned), virtualSize, virtualRoom?.height ?: VirtualRoom.DEFAULT_HEIGHT_M, scannedWallAhead(h, headForward))
+    }
+
+    /** Horizontal distance to the nearest scanned wall straight ahead (at desk height), or null. */
+    private fun scannedWallAhead(h: Vec3, forward: Vec3): Float? {
+        val f = Vec3(forward.x, 0f, forward.z).let { if (it.length < 0.1f) return null else it.normalized() }
+        val from = Vec3(h.x, h.y - 0.6f, h.z)
+        var best: Float? = null
+        for (w in reach.walls(planeTracker.scanned)) {
+            val n = w.normal
+            val denom = f.dot(n)
+            if (kotlin.math.abs(denom) < 0.2f) continue
+            val t = (w.centroid - from).dot(n) / denom
+            if (t <= 0f || t > 3f) continue
+            val p = from + f * t
+            val flat = reach.flat(w)
+            if (!flat.contains(flat.to2(p), -0.3f)) continue
+            if (best == null || t < best) best = t
+        }
+        return best
+    }
 
     private fun setVirtualRoom(room: VirtualRoom?) {
         virtualRoom = room
@@ -990,7 +1017,7 @@ class CellViewModel(private val appContext: Context) : ViewModel() {
         setVirtualRoom(next)
         robot?.let { r ->
             if (r.tableId == VirtualRoom.TABLE_ID && r.mount == Mount.DESK) {
-                robot = placeRule.constrain(r.copy(base = r.base + shift), planes())
+                robot = placeRule.constrain(r.copy(base = r.base + shift), planes(), head)
             }
         }
         for (i in pins.indices) {
@@ -1156,9 +1183,20 @@ class CellViewModel(private val appContext: Context) : ViewModel() {
         }
     }
 
+    /** Sounds respect the mute key (D15); the collision sound at most once per [HIT_SOUND_GAP_MS] (a dragged arm can graze a desk again and again). */
     private fun emit(effect: CellUiEffect) {
+        if (effect is CellUiEffect.Sound) {
+            if (!settings.sound) return
+            if (effect.kind == SoundKind.HIT) {
+                val now = SystemClock.elapsedRealtime()
+                if (now - lastHitSoundMs < HIT_SOUND_GAP_MS) return
+                lastHitSoundMs = now
+            }
+        }
         _effects.tryEmit(effect)
     }
+
+    private var lastHitSoundMs = -HIT_SOUND_GAP_MS
 
     // =========================================================================================
     // debug hooks
@@ -1529,6 +1567,7 @@ class CellViewModel(private val appContext: Context) : ViewModel() {
                 language = settings.language,
                 units = settings.units,
                 showSphere = settings.showSphere,
+                sound = settings.sound,
                 dragging = dragging,
                 canUndo = undo.isNotEmpty(),
                 hasTable = hasTable,
@@ -1629,6 +1668,7 @@ class CellViewModel(private val appContext: Context) : ViewModel() {
         private const val RESTORE_TIMEOUT_MS = 10_000L
         private const val BLOCK_GRACE_MS = 4000L
         private const val MAX_WAYPOINTS = 12
+        private const val HIT_SOUND_GAP_MS = 2000L
 
         /** No desk this long after the scene is up: the virtual room stands in (factory rule D7: about 5 s). */
         private const val VIRTUAL_AFTER_MS = 5000L

@@ -173,4 +173,6 @@
     <string name="vsize_s">小</string>
     <string name="vsize_m">中</string>
     <string name="vsize_l">大</string>
+    <string name="action_mute">静音</string>
+    <string name="action_unmute">打开声音</string>
 </resources>

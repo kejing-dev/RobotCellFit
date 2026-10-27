@@ -27,13 +27,13 @@ class PlaceRobotUseCase(private val reach: ReachUseCase) {
     ): Robot? =
         when {
             plane.kind == SurfaceKind.TABLE && plane.horizontal -> {
-                val base = reach.clampOnTable(point, plane)
+                val base = clearOnTable(point, plane, head)
                 val yaw = heading(base, reach.flat(plane).centroid, head)
                 Robot(base, Mount.DESK, yaw, 0f, gripperM, joints, plane.id)
             }
             plane.kind == SurfaceKind.FLOOR -> {
                 val floorY = plane.maxY
-                val base = reach.clampOffTables(point, floorY, planes)
+                val base = clearOffTables(point, floorY, planes, head)
                 val table = reach.nearestTable(base, planes, 3f)
                 val pedestal = reach.pedestalHeight(base, floorY, planes)
                 val yaw = heading(base, table?.let { reach.flat(it).centroid }, head)
@@ -42,13 +42,58 @@ class PlaceRobotUseCase(private val reach: ReachUseCase) {
             else -> null
         }
 
-    /** Keeps a moved base legal for its mount (design `rules.move`). */
-    fun constrain(robot: Robot, planes: Collection<PlaneSurface>): Robot {
+    /** Keeps a moved base legal for its mount (design `rules.move`) and, with [head], clear of the user (D14). */
+    fun constrain(robot: Robot, planes: Collection<PlaneSurface>, head: Vec3? = null): Robot {
         val table = robot.tableId?.let { id -> planes.firstOrNull { it.id == id } }
         return when (robot.mount) {
-            Mount.DESK -> if (table != null) robot.copy(base = reach.clampOnTable(robot.base, table)) else robot
-            Mount.FLOOR -> robot.copy(base = reach.clampOffTables(robot.base, robot.base.y, planes))
+            Mount.DESK -> if (table != null) robot.copy(base = clearOnTable(robot.base, table, head)) else robot
+            Mount.FLOOR -> robot.copy(base = clearOffTables(robot.base, robot.base.y, planes, head))
         }
+    }
+
+    /**
+     * Factory rule D14 (nothing large stands in the user's face): the base is pushed horizontally away from the
+     * head to [HEAD_CLEAR_M] (a UR5e with its reach is a large object). Null head: unchanged.
+     */
+    fun clearOfHead(p: Vec3, head: Vec3?, min: Float = HEAD_CLEAR_M): Vec3 {
+        if (head == null) return p
+        val d = Vec3(p.x - head.x, 0f, p.z - head.z)
+        val l = d.length
+        if (l >= min) return p
+        val dir = if (l < 1e-3f) Vec3.AHEAD else d / l
+        return Vec3(head.x + dir.x * min, p.y, head.z + dir.z * min)
+    }
+
+    fun headClearance(p: Vec3, head: Vec3?): Float = if (head == null) Float.MAX_VALUE else hypot(p.x - head.x, p.z - head.z)
+
+    /** On a desk: push out, keep inside the top; a desk too near the user gets the point of it farthest out along the push. */
+    private fun clearOnTable(point: Vec3, table: PlaneSurface, head: Vec3?): Vec3 {
+        var best = reach.clampOnTable(clearOfHead(point, head), table)
+        var k = 1
+        while (headClearance(best, head) < HEAD_CLEAR_M - 1e-3f && k <= PUSH_STEPS) {
+            val tryP = reach.clampOnTable(clearOfHead(point, head, HEAD_CLEAR_M + PUSH_STEP_M * k), table)
+            if (headClearance(tryP, head) > headClearance(best, head)) best = tryP
+            k++
+        }
+        return best
+    }
+
+    /** On the floor: push out, then keep the pedestal off the desks (and push again if that brought it back in). */
+    private fun clearOffTables(point: Vec3, floorY: Float, planes: Collection<PlaneSurface>, head: Vec3?): Vec3 {
+        var p = reach.clampOffTables(clearOfHead(point, head), floorY, planes)
+        var k = 1
+        while (headClearance(p, head) < HEAD_CLEAR_M - 1e-3f && k <= PUSH_STEPS) {
+            p = reach.clampOffTables(clearOfHead(point, head, HEAD_CLEAR_M + PUSH_STEP_M * k), floorY, planes)
+            k++
+        }
+        return p
+    }
+
+    companion object {
+        /** Factory rule D14: large objects stay at least this far from the head, horizontally. */
+        const val HEAD_CLEAR_M = 0.8f
+        private const val PUSH_STEP_M = 0.1f
+        private const val PUSH_STEPS = 8
     }
 
     private fun heading(base: Vec3, target: Vec3?, head: Vec3?): Float {

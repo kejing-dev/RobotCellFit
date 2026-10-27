@@ -109,6 +109,7 @@ internal object DebugCommands {
             "planes" -> scene?.planesSummary()?.forEach { CellLog.i(it) } ?: CellLog.i(NO_SCENE)
             "park" -> CellLog.i(scene?.parkPanel() ?: NO_SCENE)
             "fps" -> CellLog.i(scene?.setFpsLine(first == "on") ?: NO_SCENE)
+            "snackpull" -> CellLog.i(scene?.forceSnackPull(first.toFloatOrNull()) ?: NO_SCENE)
             "run" ->
                 when (first) {
                     "pins" -> host.dispatch(CellEvent.RunPinsClicked)

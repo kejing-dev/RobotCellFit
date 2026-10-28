@@ -62,6 +62,14 @@ and a check whether it can reach the pins, using real robotics").
   head-locked snackbar (moved inside its camera anchor: replacing the AnchorComponent detaches it), plates, hit tag,
   coachmark. Pin plates are hidden while a program plays and stacked when pins are close. Tracking regained ->
   the panel re-parks in front of the head. The virtual desk stops 0.25 m short of a scanned wall straight ahead.
+- **v0.1.3 layout pass** (user: "MoveJ / MoveL too cramped, the gripper icon means nothing, more relaxed UI,
+  better typography"; profile B19 / D13): cell panel 440 x 504 dp, 10 dp rows, 220 dp tab area; type tiers
+  `CellType.section` (titleMedium 600) / body / `CellType.caption` (bodySmall, labelSecondary); the run tab in two
+  titled groups with every button worded and 48 dp high; worded turn / step / remove / clear / stop / loop /
+  fingers buttons (only sound, undo, more, delete stay icon-only); disabled buttons keep labelPrimary content and
+  let SpatialUI dim them. HD before / after + measured contrast: `../spatial-app-factory/apps/robot-cell/build/
+  ui-audit.md` (`tools/hd_panels.sh <apk> <dir>`, `tools/contrast.py`). Emulator HD = AVD.conf
+  `[advanced_setting] graphics_preset=2` + config.ini 2560 x 2558 (PICO_6_1_Factory5 is set; backups `*.bak-sd`).
 - **Factory rules D14 / D15 / D1** (from `../spatial-app-factory/apps/_audit/sound-and-clearance.md`): placing and
   dragging keep the base >= 0.8 m from the head horizontally (`PlaceRobotUseCase.clearOfHead`, desk: farthest legal
   point when the desk is too near); the robot goes to 25 % when the head is within 0.5 m of the arm (log `NEAR`);

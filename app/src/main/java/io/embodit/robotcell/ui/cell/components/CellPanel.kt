@@ -91,17 +91,19 @@ internal fun AimPanel(state: CellUiState, filled: Boolean, onEvent: (CellEvent) 
 }
 
 /**
- * The cell panel (400 x 400 dp at 0.75; S05 - S12): name badge row, the three verdict chips, the
- * pose / joints / pins segments, the tab content, the hint line and the bottom action row.
+ * The cell panel (440 x 504 dp at 0.75; S05 - S12, S22 - S24). v0.1.3 (user: "too cramped, improve the
+ * typography"): 16 dp padding, 10 dp between rows, a 220 dp tab area, three type tiers (section / body /
+ * caption) and words on every button whose icon alone is not obvious. Rows: name badge + sound / undo / more,
+ * the verdict chips, the four tabs, the tab content, the hint line, the bottom action row.
  */
 @Composable
 internal fun CellPanel(state: CellUiState, filled: Boolean, onEvent: (CellEvent) -> Unit) {
     val (w, h) = PanelSpec.CELL_SIZE
-    Glass(w.dp, h.dp) {
+    Glass(w.dp, h.dp, spacing = RowGap) {
         if (!filled) return@Glass
         val r = state.robot ?: return@Glass
         val disabled = state.trackingLost
-        // row 1: name badge, collision flag, undo, more
+        // row 1: name badge, collision flag, sound, undo, more
         Row(modifier = Modifier.fillMaxWidth().height(KeyHeight), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(
                 text = rs(R.string.robot_name) + " · " + if (r.mount == Mount.DESK) rs(R.string.mount_desk) else rs(R.string.mount_floor),
@@ -109,11 +111,13 @@ internal fun CellPanel(state: CellUiState, filled: Boolean, onEvent: (CellEvent)
                 style = CellType.title,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
             )
             if (state.collides) {
                 Chip(iconRes = R.drawable.ic_cross, label = rs(R.string.badge_collides), value = null, color = PicoTheme.colorScheme.error)
             }
             Spacer(modifier = Modifier.weight(1f))
+            SoundKey(state, onEvent)
             Key("undo", R.drawable.ic_undo, rs(R.string.action_undo), enabled = state.canUndo && !disabled) { onEvent(CellEvent.UndoClicked) }
             Key("more", R.drawable.ic_more, rs(R.string.action_more)) { onEvent(CellEvent.MoreClicked) }
         }
@@ -124,11 +128,11 @@ internal fun CellPanel(state: CellUiState, filled: Boolean, onEvent: (CellEvent)
             items = listOf("tab_pose" to rs(R.string.tab_pose), "tab_joints" to rs(R.string.tab_joints), "tab_pins" to rs(R.string.tab_pins), "tab_run" to rs(R.string.tab_run)),
             selected = state.tab.ordinal,
             onSelect = { onEvent(CellEvent.TabSelected(Tab.entries[it])) },
-            itemWidth = 90.dp,
-            height = 40.dp,
+            itemWidth = 102.dp,
+            height = 44.dp,
         )
-        // content 136
-        Column(modifier = Modifier.fillMaxWidth().height(136.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        // tab content
+        Column(modifier = Modifier.fillMaxWidth().height(ContentHeight)) {
             when (state.tab) {
                 Tab.POSE -> PoseGrid(r.pose, disabled, onEvent)
                 Tab.JOINTS -> JointsTab(state, disabled, onEvent)
@@ -138,31 +142,35 @@ internal fun CellPanel(state: CellUiState, filled: Boolean, onEvent: (CellEvent)
         }
         // hint line (factory rule D1)
         Text(
-            text = rs(R.string.hint_stick),
-            color = PicoTheme.colorScheme.labelSecondary,
-            style = CellType.figure,
+            text = if (state.tab == Tab.RUN) rs(R.string.hint_run) else rs(R.string.hint_stick),
+            // labelPrimary: the secondary role measured 4.46:1 on the glass at this size (D13 wants 4.5)
+            color = PicoTheme.colorScheme.labelPrimary,
+            style = CellType.caption,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.fillMaxWidth().height(16.dp),
+            modifier = Modifier.fillMaxWidth().height(20.dp),
         )
-        // bottom row
+        // bottom row: turn 15 degrees either way (icon + figure), the tool, delete
         Row(modifier = Modifier.fillMaxWidth().height(KeyHeight), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Key("rot_ccw", R.drawable.ic_rot_ccw, rs(R.string.action_rot_ccw), enabled = !disabled) { onEvent(CellEvent.RotateClicked(15f)) }
-            Key("rot_cw", R.drawable.ic_rot_cw, rs(R.string.action_rot_cw), enabled = !disabled) { onEvent(CellEvent.RotateClicked(-15f)) }
+            WordButton("rot_ccw", rs(R.string.action_turn15), { onEvent(CellEvent.RotateClicked(15f)) }, enabled = !disabled, minWidth = 88.dp, iconRes = R.drawable.ic_rot_ccw)
+            WordButton("rot_cw", rs(R.string.action_turn15), { onEvent(CellEvent.RotateClicked(-15f)) }, enabled = !disabled, minWidth = 88.dp, iconRes = R.drawable.ic_rot_cw)
             val g = r.robot.gripperM
             WordButton(
                 "gripper",
                 if (g < 0.005f) rs(R.string.gripper_none) else rs(R.string.gripper_len, rs(R.string.gripper_2f)),
                 { onEvent(CellEvent.GripperCycled) },
                 enabled = !disabled,
-                minWidth = 112.dp,
+                minWidth = 136.dp,
             )
             Spacer(modifier = Modifier.weight(1f))
-            SoundKey(state, onEvent)
             Key("delete", R.drawable.ic_trash, rs(R.string.action_delete), enabled = !disabled) { onEvent(CellEvent.DeleteClicked) }
         }
     }
 }
+
+/** Gap between the panel's rows and the height of the tab area (v0.1.3 relaxed layout). */
+private val RowGap = 10.dp
+private val ContentHeight = 220.dp
 
 /** The mute key (factory rule D15): on the main panel, one press, remembered. */
 @Composable
@@ -239,171 +247,165 @@ internal fun Chip(iconRes: Int, label: String, value: String?, color: Color, neu
     }
 }
 
-/** 2 x 2 preset tiles (180 x 64): side-view pictogram 32 + name; the current pose gets the interaction frame. */
+/**
+ * 2 x 2 preset tiles (200 x 104): side-view pictogram 40 + name. The current pose is the white tile with ink
+ * content (the confirming style), every other tile the tertiary fill with glass text.
+ */
 @Composable
 private fun ColumnScope.PoseGrid(current: Pose?, disabled: Boolean, onEvent: (CellEvent) -> Unit) {
     val rows = listOf(listOf(Pose.UPRIGHT, Pose.TUCKED), listOf(Pose.REACH, Pose.PICK))
-    for (row in rows) {
-        Row(modifier = Modifier.fillMaxWidth().height(64.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            for (pose in row) {
-                val selected = pose == current
-                val onClick = { onEvent(CellEvent.PoseClicked(pose)) }
-                val content = if (disabled) PicoTheme.colorScheme.labelQuaternary else PicoTheme.colorScheme.labelPrimary
-                Button(
-                    onClick = onClick,
-                    modifier = Modifier.weight(1f).fillMaxHeight().probe("pose_${pose.tag}", onClick),
-                    size = ButtonDefaults.Regular.copy(height = 64.dp, minWidth = 160.dp),
-                    shape = RoundedCornerShape(20.dp),
-                    enabled = !disabled,
-                    colors =
-                        ButtonDefaults.buttonColors(
-                            containerColor = if (selected) PicoTheme.colorScheme.interaction.copy(alpha = 0.32f) else PicoTheme.colorScheme.fillTertiary,
-                            contentColor = content,
-                        ),
-                ) {
-                    Icon(painter = painterResource(poseIcon(pose)), contentDescription = null, modifier = Modifier.size(32.dp), tint = if (selected) PicoTheme.colorScheme.interaction else content)
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Text(text = poseName(pose), color = content, style = CellType.figure, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        for (row in rows) {
+            Row(modifier = Modifier.fillMaxWidth().height(100.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                for (pose in row) {
+                    val selected = pose == current
+                    val onClick = { onEvent(CellEvent.PoseClicked(pose)) }
+                    val content =
+                        when {
+                            disabled -> PicoTheme.colorScheme.labelQuaternary
+                            selected -> CellColors.StripeInk
+                            else -> PicoTheme.colorScheme.labelPrimary
+                        }
+                    Button(
+                        onClick = onClick,
+                        modifier = Modifier.weight(1f).fillMaxHeight().probe("pose_${pose.tag}", onClick),
+                        size = ButtonDefaults.Regular.copy(height = 100.dp, minWidth = 160.dp),
+                        shape = RoundedCornerShape(24.dp),
+                        enabled = !disabled,
+                        colors = ButtonDefaults.buttonColors(containerColor = if (selected) PicoTheme.colorScheme.labelPrimaryLight else PicoTheme.colorScheme.fillTertiary, contentColor = content),
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Icon(painter = painterResource(poseIcon(pose)), contentDescription = null, modifier = Modifier.size(40.dp), tint = content)
+                            Text(text = poseName(pose), color = content, style = CellType.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
                 }
             }
         }
     }
 }
 
-/** J1 - J6 segments, the big slider with -5 / +5, the angle line with Zero (design `tabs.joints`). */
+/** J1 - J6 segments, the slider between -5 deg / +5 deg (worded), the joint's name and angle with Zero (design `tabs.joints`). */
 @Composable
 private fun ColumnScope.JointsTab(state: CellUiState, disabled: Boolean, onEvent: (CellEvent) -> Unit) {
     val r = state.robot ?: return
     val j = state.selectedJoint.coerceIn(0, 5)
-    Segments(
-        items = (1..6).map { "joint_$it" to "J$it" },
-        selected = j,
-        onSelect = { onEvent(CellEvent.JointSelected(it)) },
-        itemWidth = 60.dp,
-        height = 40.dp,
-    )
-    Row(modifier = Modifier.fillMaxWidth().height(KeyHeight), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Key("joint_minus", R.drawable.ic_minus, rs(R.string.action_minus5), enabled = !disabled) { onEvent(CellEvent.JointStepped(-5f)) }
-        Slider(
-            value = r.robot.joints[j].coerceIn(-180f, 180f),
-            onValueChange = { onEvent(CellEvent.JointChanged(it)) },
-            valueRange = -180f..180f,
-            onValueChangeFinished = {},
-            enabled = !disabled,
-            sliderSpec = SliderDefaults.Regular,
-            modifier = Modifier.weight(1f).probe("joint_slider"),
+    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Segments(
+            items = (1..6).map { "joint_$it" to "J$it" },
+            selected = j,
+            onSelect = { onEvent(CellEvent.JointSelected(it)) },
+            itemWidth = 68.dp,
+            height = 44.dp,
         )
-        Key("joint_plus", R.drawable.ic_plus, rs(R.string.action_plus5), enabled = !disabled) { onEvent(CellEvent.JointStepped(5f)) }
-    }
-    Row(modifier = Modifier.fillMaxWidth().height(32.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(text = jointName(j), color = PicoTheme.colorScheme.labelPrimary, style = CellType.figure, maxLines = 1)
-        Text(text = fmtDeg(r.robot.joints[j]), color = PicoTheme.colorScheme.labelPrimary, style = CellType.angle, maxLines = 1, softWrap = false)
-        Spacer(modifier = Modifier.weight(1f))
-        WordButton("joint_zero", rs(R.string.action_zero), { onEvent(CellEvent.JointsZeroed) }, enabled = !disabled, minWidth = 88.dp, height = 32.dp)
+        Row(modifier = Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(text = jointName(j), color = PicoTheme.colorScheme.labelSecondary, style = CellType.caption, maxLines = 1)
+                Text(text = fmtDeg(r.robot.joints[j]), color = PicoTheme.colorScheme.labelPrimary, style = CellType.angle, maxLines = 1, softWrap = false)
+            }
+            WordButton("joint_zero", rs(R.string.action_zero), { onEvent(CellEvent.JointsZeroed) }, enabled = !disabled, minWidth = 120.dp)
+        }
+        Row(modifier = Modifier.fillMaxWidth().height(KeyHeight), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            WordButton("joint_minus", rs(R.string.action_minus5_short), { onEvent(CellEvent.JointStepped(-5f)) }, enabled = !disabled, minWidth = 80.dp)
+            Slider(
+                value = r.robot.joints[j].coerceIn(-180f, 180f),
+                onValueChange = { onEvent(CellEvent.JointChanged(it)) },
+                valueRange = -180f..180f,
+                onValueChangeFinished = {},
+                enabled = !disabled,
+                sliderSpec = SliderDefaults.Regular,
+                modifier = Modifier.weight(1f).probe("joint_slider"),
+            )
+            WordButton("joint_plus", rs(R.string.action_plus5_short), { onEvent(CellEvent.JointStepped(5f)) }, enabled = !disabled, minWidth = 80.dp)
+        }
     }
 }
 
 /**
- * The pins tab (v0.1.2): tapping the desk drops a pin, tapping a pin selects it. The selected pin's verdict
- * (traffic light + reason, from IK, joint limits, singularities and collisions) and its metrics; the approach
- * (from top / from side), Go (the arm moves there and closes the fingers), remove, clear.
+ * The pins tab (v0.1.2; v0.1.3 layout): tapping the desk drops a pin, tapping a pin selects it. The selected pin's
+ * verdict chip (traffic light + reason, from IK, joint limits, singularities and collisions) and its metrics; then
+ * the approach, Go (the arm moves there and closes the fingers), Remove, Clear all — all worded.
  */
 @Composable
 private fun ColumnScope.PinsTab(state: CellUiState, disabled: Boolean, onEvent: (CellEvent) -> Unit) {
     val v = state.verdict
     val sel = state.selected
-    Row(modifier = Modifier.fillMaxWidth().height(40.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (sel == null) {
-            Text(text = if (v.pinsTotal == 0) rs(R.string.pins_hint) else rs(R.string.pin_none_selected), color = PicoTheme.colorScheme.labelPrimary, style = CellType.body, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        } else {
-            Chip(
-                iconRes = levelIcon(sel.level),
-                label = rs(R.string.pin_label, sel.number) + " · " + reasonText(sel, state),
-                value = null,
-                color = levelColor(sel.level),
-            )
+    Column(modifier = Modifier.fillMaxWidth().fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(text = rs(R.string.pins_section), color = PicoTheme.colorScheme.labelPrimary, style = CellType.section, maxLines = 1)
+        Row(modifier = Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (sel == null) {
+                Text(text = if (v.pinsTotal == 0) rs(R.string.pins_hint) else rs(R.string.pin_none_selected), color = PicoTheme.colorScheme.labelPrimary, style = CellType.body, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            } else {
+                Chip(iconRes = levelIcon(sel.level), label = rs(R.string.pin_label, sel.number) + " · " + reasonText(sel, state), value = null, color = levelColor(sel.level))
+            }
         }
-    }
-    Row(modifier = Modifier.fillMaxWidth().height(24.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         val metrics =
             if (sel != null && sel.plan.grasp != null) {
                 rs(R.string.pin_metrics, fmtDeg(sel.plan.wristDeg), fmtDeg(sel.plan.elbowDeg), String.format(java.util.Locale.US, "%.1f", sel.plan.kappa))
             } else {
                 if (v.pinsTotal == 0) rs(R.string.pins_none) else rs(R.string.pins_count, v.pinsTotal, v.pinsOk)
             }
-        Text(text = metrics, color = PicoTheme.colorScheme.labelSecondary, style = CellType.figure, maxLines = 1, overflow = TextOverflow.Ellipsis)
-    }
-    Row(modifier = Modifier.fillMaxWidth().height(KeyHeight), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        WordButton(
-            "pin_approach",
-            if (state.approach == Approach.TOP) rs(R.string.approach_top) else rs(R.string.approach_side),
-            { onEvent(CellEvent.ApproachToggled) },
-            enabled = !disabled && !state.running,
-            minWidth = 120.dp,
-        )
-        WordButton("pin_go", rs(R.string.action_go), { onEvent(CellEvent.GoToPinClicked) }, primary = true, enabled = !disabled && !state.running && (sel?.reachable ?: (v.pinsOk > 0)), minWidth = 96.dp)
+        Text(text = metrics, color = PicoTheme.colorScheme.labelSecondary, style = CellType.caption, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Spacer(modifier = Modifier.weight(1f))
-        Key("pin_remove", R.drawable.ic_trash, rs(R.string.action_remove_pin), enabled = sel != null && !disabled) { onEvent(CellEvent.RemovePinClicked) }
-        Key("clear_pins", R.drawable.ic_close, rs(R.string.action_clear_pins), enabled = v.pinsTotal > 0 && !disabled) { onEvent(CellEvent.ClearPinsClicked) }
+        Row(modifier = Modifier.fillMaxWidth().height(KeyHeight), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            WordButton("pin_approach", if (state.approach == Approach.TOP) rs(R.string.approach_top) else rs(R.string.approach_side), { onEvent(CellEvent.ApproachToggled) }, enabled = !disabled && !state.running, minWidth = 112.dp)
+            WordButton("pin_go", rs(R.string.action_go), { onEvent(CellEvent.GoToPinClicked) }, primary = true, enabled = !disabled && !state.running && (sel?.reachable ?: (v.pinsOk > 0)), minWidth = 88.dp)
+            Spacer(modifier = Modifier.weight(1f))
+            WordButton("pin_remove", rs(R.string.action_remove_short), { onEvent(CellEvent.RemovePinClicked) }, enabled = sel != null && !disabled, minWidth = 80.dp)
+            WordButton("clear_pins", rs(R.string.action_clear_short), { onEvent(CellEvent.ClearPinsClicked) }, enabled = v.pinsTotal > 0 && !disabled, minWidth = 80.dp)
+        }
     }
 }
 
 /**
- * The run tab (v0.1.2): run the reachable pins (pre-grasp MoveJ, MoveL down, close, MoveL up, open), play the
- * taught path (MoveJ / MoveL, loop), stop, open / close the fingers; teach a point (the current pose), clear.
- * Dragging the yellow ball at the fingertips moves the arm by inverse kinematics.
+ * The run tab (v0.1.3 layout, user: "MoveJ / MoveL too cramped, the gripper icon means nothing"): two groups.
+ * One-tap run: a status / hint caption, Run pins (primary) and Stop. Taught path: a section title with the
+ * point count and what MoveJ / MoveL mean, Add point, MoveJ | MoveL, Play; then Loop on / off, Clear path and
+ * the fingers' Open / Close — every button worded, 48 dp high.
  */
 @Composable
 private fun ColumnScope.RunTab(state: CellUiState, disabled: Boolean, onEvent: (CellEvent) -> Unit) {
     val running = state.running
-    Row(modifier = Modifier.fillMaxWidth().height(KeyHeight), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        WordButton("run_pins", rs(R.string.action_run_pins), { onEvent(CellEvent.RunPinsClicked) }, primary = !running, enabled = !disabled && !running && state.verdict.pinsOk > 0, minWidth = 112.dp, iconRes = R.drawable.ic_play)
-        WordButton("run_path", rs(R.string.action_play_path), { onEvent(CellEvent.PlayPathClicked) }, enabled = !disabled && !running, minWidth = 112.dp, iconRes = R.drawable.ic_play)
-        Spacer(modifier = Modifier.weight(1f))
-        Key("run_stop", R.drawable.ic_stop, rs(R.string.action_stop), enabled = running) { onEvent(CellEvent.StopClicked) }
-        Key("run_grip", R.drawable.ic_grip, rs(R.string.action_grip), enabled = !disabled && !running && (state.robot?.robot?.gripperM ?: 0f) > 0.005f) { onEvent(CellEvent.GripToggled) }
-    }
-    Row(modifier = Modifier.fillMaxWidth().height(KeyHeight), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        WordButton("run_point", rs(R.string.action_add_point, state.waypoints + 1), { onEvent(CellEvent.WaypointAdded) }, enabled = !disabled && !running && state.waypoints < 12, minWidth = 96.dp, iconRes = R.drawable.ic_point)
-        Segments(
-            items = listOf("move_j" to rs(R.string.move_j), "move_l" to rs(R.string.move_l)),
-            selected = if (state.linear) 1 else 0,
-            onSelect = { onEvent(CellEvent.LinearSelected(it == 1)) },
-            itemWidth = 60.dp,
-            height = 40.dp,
-        )
-        Spacer(modifier = Modifier.weight(1f))
-        ToggleKey("run_loop", R.drawable.ic_loop, rs(R.string.action_loop), on = state.loop, enabled = !disabled) { onEvent(CellEvent.LoopToggled) }
-        Key("run_clear", R.drawable.ic_close, rs(R.string.action_clear_path), enabled = state.waypoints > 0 && !disabled) { onEvent(CellEvent.PathCleared) }
-    }
     val m = state.motion
     val status =
-        when {
-            m?.kind == RunKind.PINS -> rs(R.string.run_playing_pins, state.verdict.pinsOk)
-            m?.kind == RunKind.PATH -> rs(R.string.run_playing_path)
-            m?.kind == RunKind.GOTO -> rs(R.string.run_playing_goto, state.selected?.number ?: 0)
-            state.waypoints >= 2 -> rs(R.string.run_idle_points, state.waypoints) + " · " + rs(R.string.run_hint)
-            else -> rs(R.string.run_hint)
+        when (m?.kind) {
+            RunKind.PINS -> rs(R.string.run_playing_pins, state.verdict.pinsOk)
+            RunKind.PATH -> rs(R.string.run_playing_path)
+            RunKind.GOTO -> rs(R.string.run_playing_goto, state.selected?.number ?: 0)
+            null -> rs(R.string.run_hint)
         }
-    Text(text = status, color = PicoTheme.colorScheme.labelSecondary, style = CellType.figure, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.fillMaxWidth().height(24.dp))
-}
-
-/** A [Key] that shows an on state (the interaction tint behind the icon). */
-@Composable
-private fun ToggleKey(name: String, iconRes: Int, description: String, on: Boolean, enabled: Boolean, onClick: () -> Unit) {
-    val content = if (!enabled) PicoTheme.colorScheme.labelQuaternary else if (on) PicoTheme.colorScheme.interaction else PicoTheme.colorScheme.labelPrimaryLight
-    com.pico.spatial.ui.design.IconButton(
-        onClick = onClick,
-        modifier = Modifier.probe(name, onClick),
-        colors =
-            com.pico.spatial.ui.design.IconButtonDefaults.iconButtonColors(
-                containerColor = if (on) PicoTheme.colorScheme.interaction.copy(alpha = 0.32f) else PicoTheme.colorScheme.fillPrimary,
-                contentColor = content,
-            ),
-        size = com.pico.spatial.ui.design.IconButtonDefaults.iconButtonSize(width = KeyWidth, height = KeyHeight),
-        enabled = enabled,
-    ) {
-        Icon(painter = painterResource(iconRes), contentDescription = description, modifier = Modifier.size(24.dp), tint = content)
+    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(modifier = Modifier.fillMaxWidth().height(22.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(text = rs(R.string.run_section_auto), color = PicoTheme.colorScheme.labelPrimary, style = CellType.section, maxLines = 1)
+            Text(text = status, color = if (running) PicoTheme.colorScheme.labelPrimary else PicoTheme.colorScheme.labelSecondary, style = CellType.caption, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Row(modifier = Modifier.fillMaxWidth().height(KeyHeight), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            WordButton("run_pins", rs(R.string.action_run_pins), { onEvent(CellEvent.RunPinsClicked) }, modifier = Modifier.weight(1f), primary = !running, enabled = !disabled && !running && state.verdict.pinsOk > 0, iconRes = R.drawable.ic_play)
+            WordButton("run_stop", rs(R.string.action_stop), { onEvent(CellEvent.StopClicked) }, danger = running, enabled = running, minWidth = 120.dp, iconRes = R.drawable.ic_stop)
+        }
+        Spacer(modifier = Modifier.height(6.dp))
+        Row(modifier = Modifier.fillMaxWidth().height(22.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(text = rs(R.string.run_section_path, state.waypoints), color = PicoTheme.colorScheme.labelPrimary, style = CellType.section, maxLines = 1)
+            Text(text = rs(R.string.run_move_explain), color = PicoTheme.colorScheme.labelSecondary, style = CellType.caption, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Row(modifier = Modifier.fillMaxWidth().height(KeyHeight), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            WordButton("run_point", rs(R.string.action_add_point_short), { onEvent(CellEvent.WaypointAdded) }, enabled = !disabled && !running && state.waypoints < 12, minWidth = 104.dp, iconRes = R.drawable.ic_point)
+            Segments(
+                items = listOf("move_j" to rs(R.string.move_j), "move_l" to rs(R.string.move_l)),
+                selected = if (state.linear) 1 else 0,
+                onSelect = { onEvent(CellEvent.LinearSelected(it == 1)) },
+                itemWidth = 84.dp,
+                height = 48.dp,
+            )
+            WordButton("run_path", rs(R.string.action_play_short), { onEvent(CellEvent.PlayPathClicked) }, modifier = Modifier.weight(1f), enabled = !disabled && !running, iconRes = R.drawable.ic_play)
+        }
+        Row(modifier = Modifier.fillMaxWidth().height(KeyHeight), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            WordButton("run_loop", if (state.loop) rs(R.string.action_loop_on) else rs(R.string.action_loop_off), { onEvent(CellEvent.LoopToggled) }, primary = state.loop, enabled = !disabled, minWidth = 112.dp, iconRes = R.drawable.ic_loop)
+            WordButton("run_clear", rs(R.string.action_clear_path), { onEvent(CellEvent.PathCleared) }, enabled = state.waypoints > 0 && !disabled, minWidth = 112.dp)
+            val hasTool = (state.robot?.robot?.gripperM ?: 0f) > 0.005f
+            val open = state.gripWidth > 0.04f
+            WordButton("run_grip", if (open) rs(R.string.action_grip_close) else rs(R.string.action_grip_open), { onEvent(CellEvent.GripToggled) }, modifier = Modifier.weight(1f), enabled = !disabled && !running && hasTool, iconRes = R.drawable.ic_grip)
+        }
     }
 }
 

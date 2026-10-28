@@ -155,7 +155,7 @@
     <string name="action_clear_path">Clear path</string>
     <string name="move_j">MoveJ</string>
     <string name="move_l">MoveL</string>
-    <string name="run_hint">Pinch the yellow ball at the fingers and drag · the arm follows (IK)</string>
+    <string name="run_hint">The robot picks every pin it can reach</string>
     <string name="run_playing_pins">Running %1$d pins</string>
     <string name="run_playing_path">Playing path</string>
     <string name="run_playing_goto">Going to pin %1$d</string>
@@ -175,4 +175,22 @@
     <string name="vsize_l">L</string>
     <string name="action_mute">Mute sounds</string>
     <string name="action_unmute">Turn sounds on</string>
+    <!-- v0.1.3 layout -->
+    <string name="action_turn15">15°</string>
+    <string name="action_minus5_short">−5°</string>
+    <string name="action_plus5_short">+5°</string>
+    <string name="action_remove_short">Remove</string>
+    <string name="action_clear_short">Clear all</string>
+    <string name="pins_section">Can the gripper reach it?</string>
+    <string name="run_section_path">Taught path · %1$d points</string>
+    <string name="run_move_explain">J: joint moves · L: straight line</string>
+    <string name="action_add_point_short">Add point</string>
+    <string name="action_play_short">Play</string>
+    <string name="action_loop_on">Loop on</string>
+    <string name="action_loop_off">Loop off</string>
+    <string name="action_grip_open">Open fingers</string>
+    <string name="action_grip_close">Close fingers</string>
+    <string name="lang_system_short">System</string>
+    <string name="run_section_auto">One-tap run</string>
+    <string name="hint_run">Stick turns · hold the base to move · pinch the yellow ball to move the arm</string>
 </resources>

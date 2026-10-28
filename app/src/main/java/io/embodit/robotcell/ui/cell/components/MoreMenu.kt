@@ -38,7 +38,7 @@ internal fun MoreMenu(state: CellUiState, filled: Boolean, onEvent: (CellEvent) 
         }
         MenuRow(rs(R.string.menu_language)) {
             Segments(
-                items = listOf("lang_zh" to rs(R.string.lang_zh), "lang_en" to rs(R.string.lang_en), "lang_system" to null),
+                items = listOf("lang_zh" to rs(R.string.lang_zh), "lang_en" to rs(R.string.lang_en), "lang_system" to rs(R.string.lang_system_short)),
                 selected = when (state.language) {
                     LanguagePref.ZH -> 0
                     LanguagePref.EN -> 1

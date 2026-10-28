@@ -155,7 +155,7 @@
     <string name="action_clear_path">清空路径</string>
     <string name="move_j">MoveJ</string>
     <string name="move_l">MoveL</string>
-    <string name="run_hint">捏住指尖的黄球拖动 · 手臂按逆解跟随</string>
+    <string name="run_hint">机器人自己去抓够得着的钉</string>
     <string name="run_playing_pins">正在抓 %1$d 颗钉</string>
     <string name="run_playing_path">正在播放路径</string>
     <string name="run_playing_goto">正在去钉 %1$d</string>
@@ -175,4 +175,22 @@
     <string name="vsize_l">大</string>
     <string name="action_mute">静音</string>
     <string name="action_unmute">打开声音</string>
+    <!-- v0.1.3 layout -->
+    <string name="action_turn15">15°</string>
+    <string name="action_minus5_short">−5°</string>
+    <string name="action_plus5_short">+5°</string>
+    <string name="action_remove_short">拔掉</string>
+    <string name="action_clear_short">清空</string>
+    <string name="pins_section">夹爪能不能抓到？</string>
+    <string name="run_section_path">示教路径 · 已记 %1$d 点</string>
+    <string name="run_move_explain">J 关节插补 · L 走直线</string>
+    <string name="action_add_point_short">记点</string>
+    <string name="action_play_short">播放</string>
+    <string name="action_loop_on">循环 开</string>
+    <string name="action_loop_off">循环 关</string>
+    <string name="action_grip_open">张开夹爪</string>
+    <string name="action_grip_close">合上夹爪</string>
+    <string name="lang_system_short">系统</string>
+    <string name="run_section_auto">一键自动</string>
+    <string name="hint_run">摇杆转动 · 按住底座拖动 · 捏指尖黄球拖手臂</string>
 </resources>

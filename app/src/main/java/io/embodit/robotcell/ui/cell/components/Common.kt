@@ -77,6 +77,14 @@ internal object CellType {
         @Composable
         get() = PicoTheme.typography.headlineSmall.copy(fontSize = 24.sp, lineHeight = 30.sp, fontWeight = FontWeight.SemiBold, fontFeatureSettings = "tnum, lnum")
 
+    /** Section titles inside a tab (v0.1.3 tier 1 of 3 within a tab): titleMedium 16 at 600, labelPrimary. */
+    val section: TextStyle
+        @Composable get() = PicoTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold, fontFeatureSettings = "tnum, lnum")
+
+    /** Captions, metrics, hints under controls (tier 3): bodySmall at 500 (drawn in labelSecondary). */
+    val caption: TextStyle
+        @Composable get() = PicoTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium, fontFeatureSettings = "tnum, lnum")
+
     /** Hints, dialog body, snackbar: bodyLarge 16 / 24 at 500. */
     val body: TextStyle
         @Composable get() = PicoTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium, fontFeatureSettings = "tnum, lnum")
@@ -129,7 +137,8 @@ internal fun WordButton(
             primary -> PicoTheme.colorScheme.labelPrimaryLight
             else -> PicoTheme.colorScheme.fillTertiary
         }
-    val content = if (primary || danger) CellColors.StripeInk else if (enabled) PicoTheme.colorScheme.labelPrimary else PicoTheme.colorScheme.labelQuaternary
+    // disabled: SpatialUI dims the whole button itself; full-strength content keeps it legible as "off" (D13, v0.1.3)
+    val content = if (primary || danger) CellColors.StripeInk else PicoTheme.colorScheme.labelPrimary
     Button(
         onClick = onClick,
         modifier = modifier.probe(name, onClick),

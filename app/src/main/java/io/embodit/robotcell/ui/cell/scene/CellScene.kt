@@ -1182,8 +1182,8 @@ class CellScene(private val sink: (CellEvent) -> Unit) : CellProbe.SceneProbe {
         /** The cell panel leans back 12 degrees. */
         val MAIN_LEAN: Quat4 = Quat4.axisAngle(Vec3.RIGHT, -0.20944f)
 
-        /** Half sizes of the cell panel at 0.75 (0.24 x 0.24 m) with a little air, for the surface rule. */
-        private val MAIN_HALF_EXTENTS = listOf(0.13f, 0.13f, 0.01f)
+        /** Half sizes of the cell panel at 0.75 (0.264 x 0.302 m) with a little air, for the surface rule. */
+        private val MAIN_HALF_EXTENTS = listOf(0.145f, 0.165f, 0.01f)
 
         /** 14 degrees above the view centre, 0.9 m away: (0, sin14, -cos14) * 0.9. */
         private val SNACK_HEAD_OFFSET = Vec3(0f, 0.2177f, -0.8733f)

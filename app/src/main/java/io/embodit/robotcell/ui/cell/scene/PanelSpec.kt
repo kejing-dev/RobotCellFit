@@ -18,7 +18,8 @@ object PanelSpec {
     const val PLATE_PIN4 = "platePin4"
 
     /** The design's 376 dp plus one 24 dp hint line ("turn with the stick · hold the base to move"). */
-    val CELL_SIZE = 400f to 400f
+    /** v0.1.3 relaxed layout: wider tabs, a 220 dp tab area, 10 dp between rows. */
+    val CELL_SIZE = 440f to 504f
     val AIM_SIZE = 400f to 120f
     /** v0.1.2: three more rows for the virtual desk (switch + move here, size, height). */
     val MENU_SIZE = 300f to 408f

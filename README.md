@@ -6,11 +6,11 @@
 
 **Put a life-size UR5e on your real desk and see at a glance which part of the desk it can reach, whether full extension hits the wall, and whether typical poses collide with the wall or the desk.**
 
-PICO OS 6 · PICO Spatial SDK 6.1.9 · Kotlin / SpatialUI · package `io.embodit.robotcell` · v0.1.1 (pre-release / 预发布)
+PICO OS 6 · PICO Spatial SDK 6.1.9 · Kotlin / SpatialUI · package `io.embodit.robotcell` · v0.1.3
 
-> **模拟器 QA 通过，真机未验证（Simulator-QA passed; not yet verified on a real headset）。**
+> **v0.1.3：模拟器 QA 门禁通过，开发者已在 PICO 头显上试用验收（Emulator QA gate passed; tried and accepted on a PICO headset by the developer）。**
 
-![封面：UR5e 竖直立在窗边茶桌上，经纬线可达球和桌面工作盘，面板显示桌面 91% · 墙 > 50 cm](docs/cover-S05-desk.jpg)
+![海报：1:1 UR5e 带 2F-85 夹爪立在桌上，青色可达球，面板显示桌面 91% · 钉 3/4](docs/vibelab/poster-2560x1440.jpg)
 
 > 截图和演示视频来自原生模拟器（PICO Emulator 6.1），由调试广播驱动跳转到各设计状态；**非真实手势录像**。
 > Screenshots and the demo video were taken on the native PICO emulator, driven by debug broadcasts that jump to each design state; **not a recording of real hand gestures.**
@@ -18,6 +18,20 @@ PICO OS 6 · PICO Spatial SDK 6.1.9 · Kotlin / SpatialUI · package `io.embodit
 ---
 
 ## 中文
+
+### v0.1.3 新功能
+
+- **2F-85 类夹爪**（TCP 离法兰 170 mm）和 **UR5e 解析逆解**（8 组解、奇异判定）
+- **Auto Run**：「挨个抓钉」自动跑完所有够得着的钉（MoveJ 五次多项式 / MoveL 走直线），也能示教路径播放、循环
+- **钉可达性**：绿 / 黄 / 红三档，写明原因（奇异、肘伸直、超程、差多少厘米、撞桌撞墙）
+- **虚拟房间**：5 秒没扫到桌子就给一张可拖动、可调尺寸高度的虚拟桌和墙
+- **离头净空**：放置离头 ≥ 0.8 m，头离手臂 < 0.5 m 时淡出；主面板 **静音键**
+- **Run 页排版放宽**：两组标题 + 说明，按钮 48 dp 高、全部带字（合上夹爪 / 张开夹爪 / 循环 开·关 …），对比度 ≥ 4.5:1
+
+| | |
+|---|---|
+| ![Auto Run](docs/vibelab/shot-02.jpg) | ![Run 页](docs/vibelab/shot-03.jpg) |
+| ![钉判定](docs/vibelab/shot-04.jpg) | ![虚拟房间](docs/vibelab/shot-05.jpg) |
 
 ### 这是什么
 
@@ -28,7 +42,7 @@ PICO OS 6 · PICO Spatial SDK 6.1.9 · Kotlin / SpatialUI · package `io.embodit
 ### 安装与启动
 
 ```bash
-adb install -r RobotCellFit-v0.1.1.apk
+adb install -r RobotCellFit-v0.1.3.apk
 pico-cli app launch io.embodit.robotcell
 ```
 
@@ -70,6 +84,15 @@ APK 在 [Releases](https://github.com/kejing-dev/RobotCellFit/releases) 页面�
 
 ## English
 
+### New in v0.1.3
+
+- A 2F-85-class gripper (TCP 170 mm from the flange) and closed-form UR5e inverse kinematics (8 solutions, singularity checks)
+- **Auto Run**: "Run pins" visits every reachable pin (quintic MoveJ / straight-line MoveL); teach-and-play paths with loop
+- Pin reachability graded green / amber / red with the reason (singular, elbow stretched, joint limit, distance short, hits desk / wall)
+- Virtual room: no desk scanned after 5 s -> a draggable, resizable virtual desk and wall
+- Head clearance (base >= 0.8 m from the head, arm fades within 0.5 m) and a mute key
+- Relaxed Run tab: two titled groups, 48 dp buttons that all carry words, contrast >= 4.5:1
+
 ### What it is
 
 Before building a robot data-collection cell, try a life-size UR5e in your real room. Point at the desk and tap: the robot stands on it. Point at the floor and it stands on a yellow-and-black striped pedestal as high as the nearby desk. A wireframe reach sphere surrounds it, the reachable work disc is painted on the desk, and the verdict bar on the panel reads e.g. "Desk 91% · Wall > 50 cm".
@@ -79,7 +102,7 @@ Tap one of four poses (upright, tucked, reach forward, desk pick) and the arm mo
 ### Install and launch
 
 ```bash
-adb install -r RobotCellFit-v0.1.1.apk
+adb install -r RobotCellFit-v0.1.3.apk
 pico-cli app launch io.embodit.robotcell
 ```
 
